@@ -38,7 +38,7 @@ UPDATE_CONFIG_NAME = "update_config.json"
 DEFAULT_MANIFEST_URL = ""
 
 # 主程式「系統更新」按鈕：未設定環境變數／update_config.json 時，改抓本機 releases 清單
-# （於 updatetest 上層執行：python -m http.server 8000，清單路徑 releases/manifest.json）
+# （本機測試：於含 releases/manifest.json 的目錄執行 python -m http.server 8000）
 DEFAULT_LOCAL_RELEASES_MANIFEST_URL = "http://127.0.0.1:8000/releases/manifest.json"
 
 

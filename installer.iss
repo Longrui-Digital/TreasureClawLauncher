@@ -1,10 +1,13 @@
 ; Inno Setup 6 — 與 build_installer.ps1 併用
 ; 版本：由 ISCC 參數 /DMyAppVersion=x.y.z 傳入（與 version_info.py 對齊）
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.1"
+  #define MyAppVersion "1.0.0"
 #endif
 #define MyAppName "Treasure Claw AI Agent"
-#define MyAppPublisher "Treasure Claw"
+#define MyAppPublisher "Longrui Digital Technology LLC"
+#define MyappURL "https://ftrgame.com/"
+#define MyAppSupportURL "https://github.com/Longrui-Digital/TreasureClawLauncher"
+#define MyAppUpdatesURL "https://github.com/Longrui-Digital/TreasureClawLauncher/releases"
 #define MyAppExeName "TreasureClawLauncher.exe"
 
 [Setup]
@@ -13,6 +16,8 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppSupportURL={#MyAppSupportURL}
+AppUpdatesURL={#MyAppUpdatesURL}
 ; 預設路徑（使用者可在安裝精靈中變更）
 DefaultDirName={localappdata}\Programs\TreasureClaw
 ; 顯示「選擇目標位置」頁，允許自訂安裝資料夾
