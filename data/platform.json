@@ -4,10 +4,91 @@
     "vnruby88": {
       "api_origin": "https://w3.vnruby88.com",
       "guest_url": "https://w3.vnruby88.com/site/Guest"
+    },
+    "inbigrp": {
+      "api_origin": "https://w3.inbigrp.com",
+      "guest_url": "https://w3.inbigrp.com/site/Guest"
+    },
+    "winpeso88": {
+      "api_origin": "https://ftrgame.winpeso88.com",
+      "guest_url": "https://ftrgame.winpeso88.com/site/Guest"
+    },
+    "sgin123": {
+      "api_origin": "https://ftrgame.sgin123.com",
+      "guest_url": "https://ftrgame.sgin123.com/site/Guest"
+    },
+    "malaybb": {
+      "api_origin": "https://w3.malaybb.com",
+      "guest_url": "https://w3.malaybb.com/site/Guest"
+    },
+    "thailfun": {
+      "api_origin": "https://ftrgame.thailfun.com",
+      "guest_url": "https://ftrgame.thailfun.com/site/Guest"
+    },
+    "hkgplay": {
+      "api_origin": "https://w3.hkgplay.com",
+      "guest_url": "https://w3.hkgplay.com/site/Guest"
+    },
+    "iooatari": {
+      "api_origin": "https://w3.iooatari.com",
+      "guest_url": "https://w3.iooatari.com/site/Guest"
+    },
+    "krgc77": {
+      "api_origin": "https://ftrgame.krgc77.com",
+      "guest_url": "https://ftrgame.krgc77.com/site/Guest"
+    },
+    "brazil55": {
+      "api_origin": "https://ftrgame.brazil55.com",
+      "guest_url": "https://ftrgame.brazil55.com/site/Guest"
+    },
+    "emerald52": {
+      "api_origin": "https://ftrgame.emerald52.com",
+      "guest_url": "https://ftrgame.emerald52.com/site/Guest"
+    },
+    "colg77": {
+      "api_origin": "https://ftrgame.colg77.com",
+      "guest_url": "https://ftrgame.colg77.com/site/Guest"
+    },
+    "pbca123": {
+      "api_origin": "https://ftrgame.pbca123.com",
+      "guest_url": "https://ftrgame.pbca123.com/site/Guest"
+    },
+    "ivoryzar": {
+      "api_origin": "https://ftrgame.ivoryzar.com",
+      "guest_url": "https://ftrgame.ivoryzar.com/site/Guest"
     }
   },
+  "share_box_trial_level7_cumulative": {
+    "vnruby88": 15714000,
+    "inbigrp": 47142,
+    "winpeso88": 31428,
+    "sgin123": 9428400,
+    "malaybb": 3142.8,
+    "thailfun": 23571,
+    "hkgplay": 6285.6,
+    "iooatari": 125712,
+    "krgc77": 942840,
+    "brazil55": 3142.8,
+    "emerald52": 12571.2,
+    "colg77": 2357100,
+    "pbca123": 1257.12,
+    "ivoryzar": 9428.4
+  },
   "wallet_currency_by_host": {
-    "w3.vnruby88.com": "VND"
+    "w3.vnruby88.com": "VND",
+    "w3.inbigrp.com": "INR",
+    "ftrgame.winpeso88.com": "PHP",
+    "ftrgame.sgin123.com": "IDR",
+    "w3.malaybb.com": "MYR",
+    "ftrgame.thailfun.com": "THB",
+    "w3.hkgplay.com": "HKD",
+    "w3.iooatari.com": "JPY",
+    "ftrgame.krgc77.com": "KRW",
+    "ftrgame.brazil55.com": "BRL",
+    "ftrgame.emerald52.com": "MXN",
+    "ftrgame.colg77.com": "COP",
+    "ftrgame.pbca123.com": "CAD",
+    "ftrgame.ivoryzar.com": "ZAR"
   },
   "ref_referral_commission_vnd": {
     "10": 120000,

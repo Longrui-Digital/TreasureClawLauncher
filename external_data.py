@@ -19,8 +19,10 @@ def _app_base_dir() -> Path:
 
 
 def _bundled_resources_dir() -> Path:
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS)
+    # PyInstaller 打包時才會設定 _MEIPASS（非 sys 標準屬性，型別檢查用 getattr）
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and isinstance(meipass, str) and meipass:
+        return Path(meipass)
     return Path(__file__).resolve().parent
 
 
@@ -50,8 +52,9 @@ class ExternalBundles:
     platform_presets: dict[str, dict[str, str]]
     wallet_currency_by_host: dict[str, str]
     ref_referral_commission_vnd: dict[int, int]
-    commission_amt_vnd: dict[str, int]
+    commission_amt_vnd: dict[str, float]
     share_deposit_example_vnd: int
+    share_box_trial_level7_by_platform: dict[str, float]
     win_base: int
     win_default: int
     win_max: int
@@ -97,11 +100,11 @@ def load_external_bundles() -> ExternalBundles:
                 continue
 
     comm_raw = plat.get("commission_amt_vnd") or {}
-    commission_amt_vnd: dict[str, int] = {}
+    commission_amt_vnd: dict[str, float] = {}
     if isinstance(comm_raw, dict):
         for k, v in comm_raw.items():
             try:
-                commission_amt_vnd[str(k)] = int(v)
+                commission_amt_vnd[str(k)] = float(v)
             except (TypeError, ValueError):
                 continue
     if not commission_amt_vnd:
@@ -116,6 +119,15 @@ def load_external_bundles() -> ExternalBundles:
         }
 
     share_deposit_example_vnd = int(plat.get("share_deposit_example_vnd", 600000))
+
+    sbt = plat.get("share_box_trial_level7_cumulative")
+    share_box_trial_level7_by_platform: dict[str, float] = {}
+    if isinstance(sbt, dict):
+        for k, v in sbt.items():
+            try:
+                share_box_trial_level7_by_platform[str(k)] = float(v)
+            except (TypeError, ValueError):
+                continue
 
     win_base = int(plat["win_base"])
     win_default = int(plat["win_default"])
@@ -167,7 +179,17 @@ def load_external_bundles() -> ExternalBundles:
     marquee_ms = int(cj.get("in_game_ai_marquee_interval_ms", 1500))
 
     ui_i18n: dict[str, dict[str, str]] = {}
-    for lang in ("zh-tw", "vi"):
+    stems: set[str] = set()
+    for base in (_app_base_dir() / "data" / "i18n", _bundled_resources_dir() / "data" / "i18n"):
+        if not base.is_dir():
+            continue
+        for p in base.glob("*.json"):
+            if p.name.startswith("_"):
+                continue
+            stems.add(p.stem)
+    if not stems:
+        raise ValueError("data/i18n 目錄中找不到任何語系 JSON（*.json）")
+    for lang in sorted(stems):
         pack = _load_json(f"i18n/{lang}.json")
         if not isinstance(pack, dict):
             raise ValueError(f"i18n/{lang}.json 必須為物件")
@@ -182,6 +204,7 @@ def load_external_bundles() -> ExternalBundles:
         ref_referral_commission_vnd=ref_referral_commission_vnd,
         commission_amt_vnd=commission_amt_vnd,
         share_deposit_example_vnd=share_deposit_example_vnd,
+        share_box_trial_level7_by_platform=share_box_trial_level7_by_platform,
         win_base=win_base,
         win_default=win_default,
         win_max=win_max,

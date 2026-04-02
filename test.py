@@ -1,6 +1,7 @@
 from __future__ import annotations
 # pyright: reportGeneralTypeIssues=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportInvalidTypeForm=false, reportArgumentType=false, reportOperatorIssue=false
 
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -71,8 +72,8 @@ MAIN_ENTRY_BG = _t["MAIN_ENTRY_BG"]
 MAIN_SECTION_BG = _t["MAIN_SECTION_BG"]
 
 CONFIG_FILE = "config.json"
-# 介面語言：預設 zh-tw；可於 config.json 設定 "ui_language": "vi"，或登入頁下拉選單切換
-UI_LANG_DEFAULT = "vi"
+# 介面語言：預設 zh-tw；可於 config.json 設定 "ui_language"，或登入頁下拉選單切換
+UI_LANG_DEFAULT = "zh-tw"
 LOTTERY_RECORD_FILE = "lottery_record.json"
 FACEBOOK_COOKIES_FILE = "facebook_cookies.json"
 FB_REGISTRATION_RECORD_FILE = "fb_registration_record.json"
@@ -80,14 +81,16 @@ FB_REGISTRATION_RECORD_FILE = "fb_registration_record.json"
 FB_REGISTRATION_INTERVAL_SEC = 3 * 60 * 60  # 10800 秒
 # 登入／主畫面頂部媒體：GIF 檔名（實際路徑為 data/ 下，見 resolve_data_asset）
 LOGIN_MEDIA_CANDIDATES = ("VN.gif",)
-# 七階獎金說明下方表格圖（實際路徑為 data/ 下）
+# 七階獎金說明下方表格圖：預設檔名；各國見 data/{{國碼}}.jpg（resolve_tier_bonus_table_path）
 TIER_BONUS_TABLE_IMAGE = "VN.jpg"
 # 主題色見 data/theme.json；平台／金額見 data/platform.json
 REF_REFERRAL_COMMISSION_VND: dict[int, int] = _E.ref_referral_commission_vnd
 # 累積活躍會員各階／儲值佣金金額：預設來自 platform.json；登入後由 Api/Information 的 recommendAmt、commissionAmt 覆寫
 RECOMMEND_AMT_VND: dict[int, int] = dict(REF_REFERRAL_COMMISSION_VND)
-COMMISSION_AMT_VND: dict[str, int] = dict(_E.commission_amt_vnd)
+COMMISSION_AMT_VND: dict[str, float] = dict(_E.commission_amt_vnd)
 SHARE_DEPOSIT_EXAMPLE_VND: int = _E.share_deposit_example_vnd
+# share_box_trial 第7層累積提領試算（依平台；見 platform.json share_box_trial_level7_cumulative）
+SHARE_BOX_TRIAL_L7_BY_PLATFORM: dict[str, float] = dict(_E.share_box_trial_level7_by_platform)
 COMMISSION_TIERS_ORDER: tuple[str, ...] = ("30%", "20%", "10%", "4%", "3%", "2%", "1%")
 # Api/Information：特定等級時顯示洗碼／5 倍券敘述（比例尺用 turnoverRate）
 TURNOVER_LEVELS = frozenset({5, 8, 10, 12, 14, 16, 18, 20, 22})
@@ -114,6 +117,59 @@ def _parse_api_float(v: object) -> float | None:
         return float(str(v).replace(",", "").replace(" ", "").strip())
     except (ValueError, TypeError):
         return None
+
+
+def _format_amount_display(v: object) -> str:
+    """金額顯示：千分位；整數不顯示小數，有小數時最多兩位並去掉尾隨 0。"""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if x != x:  # NaN
+        return str(v)
+    if abs(x - round(x)) < 1e-9:
+        return f"{int(round(x)):,}"
+    s = f"{x:,.2f}".rstrip("0").rstrip(".")
+    return s
+
+
+# guide_revenue：由 Api/Information 的 option4 推算（第 n 天 = option4*4*係數）；無效時沿用舊版對應基準（option4=200000）
+GUIDE_REVENUE_OPTION4_DEFAULT = 200_000.0
+
+
+def _guide_revenue_resolve_option4(option4: float | None) -> float:
+    if option4 is None:
+        return GUIDE_REVENUE_OPTION4_DEFAULT
+    try:
+        x = float(option4)
+    except (TypeError, ValueError):
+        return GUIDE_REVENUE_OPTION4_DEFAULT
+    if x != x or x <= 0:  # NaN 或非正數
+        return GUIDE_REVENUE_OPTION4_DEFAULT
+    return x
+
+
+# extra_deposit_privilege：儲值門檻金額預設（Api/Information 無 UpgradeAmount 時沿用）
+EXTRA_DEPOSIT_UPGRADE_DEFAULT = 300_000
+
+
+def guide_revenue_i18n_kwargs(option4: float | None, currency: str) -> dict[str, str]:
+    """登入頁「預計收益」：第1～6天為 option4*4*0.15 / 0.2 / 0.25 / 0.4 / 0.625 / 1.25。"""
+    o4 = _guide_revenue_resolve_option4(option4)
+    base = o4 * 4.0
+    mults = (0.15, 0.2, 0.25, 0.4, 0.625, 1.25)
+    d = [_format_amount_display(base * m) for m in mults]
+    return {
+        "currency": currency,
+        "d1": d[0],
+        "d2": d[1],
+        "d3": d[2],
+        "d4": d[3],
+        "d5": d[4],
+        "d6": d[5],
+    }
+
+
 DEFAULT_PLATFORM_KEY = _E.default_platform_key
 PLATFORM_PRESETS: dict[str, dict[str, str]] = _E.platform_presets
 
@@ -150,6 +206,12 @@ def get_site_host() -> str:
 
 def get_wallet_currency_code() -> str:
     return WALLET_CURRENCY_BY_HOST.get(get_site_host(), "")
+
+
+def wallet_currency_for_ui() -> str:
+    """與 data/platform.json 的 wallet_currency_by_host 一致；未知主機時回退 VND。"""
+    c = get_wallet_currency_code()
+    return c if c else "VND"
 
 
 def format_wallet_balance_display(raw: object) -> str:
@@ -261,6 +323,47 @@ def resolve_data_asset(filename: str) -> Path | None:
     return None
 
 
+def resolve_onboarding_flag_image(code: str) -> Path | None:
+    """各國國旗圖檔：data/{{alpha2}}-flag.副檔名（支援 png / jpg / jpeg，檔名大小寫不拘）。"""
+    c = (code or "").strip().lower()
+    if len(c) != 2 or not c.isalpha():
+        return None
+    u = c.upper()
+    for stem in (f"{c}-flag", f"{u}-flag"):
+        for ext in (".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"):
+            p = resolve_data_asset(f"{stem}{ext}")
+            if p is not None:
+                return p
+    return None
+
+
+def _theme_hex_to_rgb(h: str) -> tuple[int, int, int]:
+    s = (h or "").strip().lstrip("#")
+    if len(s) != 6:
+        return (37, 42, 51)
+    return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+
+
+def _flatten_flag_rgba_on_card(im: Image.Image, card_bg_hex: str) -> Image.Image:
+    """將 RGBA 國旗疊在卡片底色上再輸出，避免 Tk／透明去背出現棋盤格或異常。"""
+    if Image is None:
+        return im
+    if im.mode != "RGBA":
+        im = im.convert("RGBA")
+    r, g, b = _theme_hex_to_rgb(card_bg_hex)
+    base = Image.new("RGBA", im.size, (r, g, b, 255))
+    return Image.alpha_composite(base, im)
+
+
+def _onboarding_emoji_font() -> tuple[str, int]:
+    """無 PNG 時顯示旗幟 emoji 用（避免 JhengHei 變成 IN、TH 字母）。"""
+    if sys.platform == "win32":
+        return ("Segoe UI Emoji", 22)
+    if sys.platform == "darwin":
+        return ("Apple Color Emoji", 22)
+    return ("Noto Color Emoji", 22)
+
+
 def launch_exe_elevated_windows(exe_path: Path, cwd: Path) -> bool:
     """以「以系統管理員身分執行」啟動程式（ShellExecuteW verb=runas）。成功回傳 True。
 
@@ -331,6 +434,166 @@ HOPE_STEP = _E.hope_step
 WORKER_CYCLE_REST_SEC = 0
 
 UI_I18N: dict[str, dict[str, str]] = _E.ui_i18n
+
+# 登入頁語言選單：顯示名（當地常用稱呼）→ 語系代碼
+LANG_DISPLAY_NAME: dict[str, str] = {
+    "zh-tw": "繁體中文",
+    "zh-hk": "繁體中文（香港）",
+    "vi": "Tiếng Việt",
+    "hi": "हिन्दी",
+    "en": "English",
+    "id": "Bahasa Indonesia",
+    "ms": "Bahasa Melayu",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt-br": "Português (Brasil)",
+    "es": "Español",
+}
+LANG_COMBO_ORDER: tuple[str, ...] = (
+    "zh-tw",
+    "zh-hk",
+    "vi",
+    "en",
+    "hi",
+    "id",
+    "ms",
+    "th",
+    "ja",
+    "ko",
+    "pt-br",
+    "es",
+)
+
+
+def _lang_combo_entries() -> tuple[tuple[str, str], ...]:
+    """(顯示標籤, 語系代碼)，僅含已載入的語系。"""
+    out: list[tuple[str, str]] = []
+    for code in LANG_COMBO_ORDER:
+        if code in UI_I18N:
+            out.append((LANG_DISPLAY_NAME.get(code, code), code))
+    return tuple(out)
+
+
+@dataclass(frozen=True, slots=True)
+class OnboardingCountry:
+    """首次選國家／地區：顯示用代碼、旗幟、繁中名、介面語言、平台鍵。"""
+
+    code: str
+    flag: str
+    label_zh: str
+    ui_language: str
+    platform_key: str
+
+
+# 分區展示；每列 4 個。平台鍵對應 data/platform.json；各國預設介面語言見 ui_language。
+ONBOARDING_REGIONS: tuple[tuple[str, tuple[OnboardingCountry, ...]], ...] = (
+    (
+        "Asia",
+        (
+            OnboardingCountry("vn", "🇻🇳", "Vietnam", "vi", "vnruby88"),
+            OnboardingCountry("in", "🇮🇳", "India", "hi", "inbigrp"),
+            OnboardingCountry("ph", "🇵🇭", "Philippines", "en", "winpeso88"),
+            OnboardingCountry("id", "🇮🇩", "Indonesia", "id", "sgin123"),
+            OnboardingCountry("my", "🇲🇾", "Malaysia", "ms", "malaybb"),
+            OnboardingCountry("th", "🇹🇭", "Thailand", "th", "thailfun"),
+            OnboardingCountry("hk", "🇭🇰", "Hongkong", "zh-hk", "hkgplay"),
+            OnboardingCountry("jp", "🇯🇵", "Japan", "ja", "iooatari"),
+            OnboardingCountry("kr", "🇰🇷", "Korea", "ko", "krgc77"),
+        ),
+    ),
+    (
+        "America",
+        (
+            OnboardingCountry("br", "🇧🇷", "Brazil", "pt-br", "brazil55"),
+            OnboardingCountry("mx", "🇲🇽", "Mexico", "es", "emerald52"),
+            OnboardingCountry("co", "🇨🇴", "Colombia", "es", "colg77"),
+            OnboardingCountry("ca", "🇨🇦", "Canada", "en", "pbca123"),
+        ),
+    ),
+    (
+        "Africa",
+        (OnboardingCountry("za", "🇿🇦", "South Africa", "en", "ivoryzar"),),
+    ),
+)
+
+_TIER_BONUS_IMAGE_EXTS: tuple[str, ...] = (".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG")
+
+
+def _tier_bonus_image_filenames_for_country(alpha2: str) -> tuple[str, ...]:
+    u = (alpha2 or "").strip().upper()
+    if len(u) != 2 or not u.isalpha():
+        return ()
+    return tuple(f"{u}{ext}" for ext in _TIER_BONUS_IMAGE_EXTS)
+
+
+def _tier_bonus_country_for_platform_key(pk: str) -> str | None:
+    """platform_presets 的鍵（如 krgc77）→ onboarding 國碼（如 kr）。"""
+    s = str(pk or "").strip()
+    if not s:
+        return None
+    for _region, countries in ONBOARDING_REGIONS:
+        for co in countries:
+            if co.platform_key == s:
+                return co.code.lower()
+    return None
+
+
+def resolve_tier_bonus_table_path() -> Path | None:
+    """七階獎金表圖：data/{{國碼}}.jpg／.png。優先依目前作用中平台（_ACTIVE_PLATFORM_KEY），與登入頁選站台一致。"""
+    def _try_country(code: str) -> Path | None:
+        for name in _tier_bonus_image_filenames_for_country(code):
+            p = resolve_data_asset(name)
+            if p is not None:
+                return p
+        return None
+
+    # 1. 目前平台（apply_platform_key／登入頁下拉會更新）
+    cc = _tier_bonus_country_for_platform_key(_ACTIVE_PLATFORM_KEY)
+    if cc:
+        p = _try_country(cc)
+        if p is not None:
+            return p
+
+    # 2. config 備援（無對應檔時再試 onboarding 首次選國）
+    cfg: dict = {}
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+            if isinstance(raw, dict):
+                cfg = raw
+    except (OSError, json.JSONDecodeError):
+        pass
+    oc = str(cfg.get("onboarding_country") or "").strip().lower()
+    if len(oc) == 2 and oc.isalpha():
+        p = _try_country(oc)
+        if p is not None:
+            return p
+
+    return resolve_data_asset(TIER_BONUS_TABLE_IMAGE)
+
+
+def normalize_ui_language(code: object) -> str:
+    """與登入頁／config 的 ui_language 正規化規則一致。"""
+    raw = str(code or UI_LANG_DEFAULT).strip().lower().replace("_", "-")
+    aliases: dict[str, str] = {
+        "zh": "zh-tw",
+        "zh-hant": "zh-tw",
+        "tw": "zh-tw",
+        "hk": "zh-hk",
+        "en-us": "en",
+        "en-gb": "en",
+        "jp": "ja",
+        "kr": "ko",
+        "pt": "pt-br",
+        "pt-pt": "pt-br",
+        "es-mx": "es",
+        "es-co": "es",
+    }
+    lang = aliases.get(raw, raw)
+    if lang not in UI_I18N:
+        lang = UI_LANG_DEFAULT
+    return lang
 
 
 def load_ui_guide_sections(lang: str) -> tuple[str, str, str]:
@@ -406,18 +669,16 @@ class API:
         ca = api_data.get("commissionAmt")
         if isinstance(ca, dict) and ca:
             for k, v in ca.items():
-                try:
-                    COMMISSION_AMT_VND[str(k)] = int(v)
-                except (TypeError, ValueError):
-                    pass
-        for dep_key in ("share_deposit_example_vnd", "depositAmt", "deposit_example_vnd"):
+                parsed = _parse_api_float(v)
+                if parsed is not None:
+                    COMMISSION_AMT_VND[str(k)] = parsed
+        for dep_key in ("600k", "share_deposit_example_vnd", "depositAmt", "deposit_example_vnd"):
             dep = api_data.get(dep_key)
             if dep is not None:
-                try:
-                    SHARE_DEPOSIT_EXAMPLE_VND = int(dep)
+                parsed = _parse_api_int(dep)
+                if parsed is not None:
+                    SHARE_DEPOSIT_EXAMPLE_VND = parsed
                     break
-                except (TypeError, ValueError):
-                    pass
 
     @staticmethod
     def map_to_dashboard(api_data: dict) -> dict:
@@ -461,6 +722,8 @@ class API:
         out["quintuple_deposit1"] = _parse_api_int(api_data.get("QuintrupleDeposit1"))
         out["quintuple_deposit2"] = _parse_api_int(api_data.get("QuintrupleDeposit2"))
         out["voucher_600k"] = _parse_api_int(api_data.get("600k"))
+        out["option4"] = _parse_api_float(api_data.get("option4"))
+        out["upgrade_amount"] = _parse_api_int(api_data.get("UpgradeAmount"))
         return out
 
     @staticmethod
@@ -1015,16 +1278,15 @@ class LoginApp:
         self._main_banner_photo = None
         self._main_scroll_canvas: tk.Canvas | None = None
 
-        self.show_login_frame()
+        saved = self.load_config()
+        if not saved.get("language_onboarding_done"):
+            self.show_language_onboarding_frame()
+        else:
+            self.show_login_frame()
 
     @staticmethod
     def _normalize_ui_language(code: object) -> str:
-        lang = str(code or UI_LANG_DEFAULT).strip().lower().replace("_", "-")
-        if lang in ("zh", "zh-hant", "tw"):
-            lang = "zh-tw"
-        if lang not in UI_I18N:
-            lang = UI_LANG_DEFAULT
-        return lang
+        return normalize_ui_language(code)
 
     @staticmethod
     def _normalize_hope_amount(raw: object) -> int | None:
@@ -1226,6 +1488,26 @@ class LoginApp:
         except (tk.TclError, AttributeError):
             pass
 
+    def _extra_deposit_upgrade_amount_display(self) -> str:
+        """儲值升級門檻：Api/Information 的 UpgradeAmount；無效時為 EXTRA_DEPOSIT_UPGRADE_DEFAULT。"""
+        d = getattr(self, "_dashboard_data", {}) or {}
+        ua = d.get("upgrade_amount")
+        if not isinstance(ua, int):
+            ua = _parse_api_int(ua) if ua is not None else None
+        if ua is None or ua <= 0:
+            ua = EXTRA_DEPOSIT_UPGRADE_DEFAULT
+        return _format_amount_display(ua)
+
+    def _share_box_trial_level7_display(self) -> str:
+        """share_box_trial 第7層累積提領試算：platform.json share_box_trial_level7_cumulative（依目前平台）。"""
+        pk = normalize_platform_key(getattr(self, "_platform_key", DEFAULT_PLATFORM_KEY))
+        raw = SHARE_BOX_TRIAL_L7_BY_PLATFORM.get(pk)
+        if raw is None:
+            raw = SHARE_BOX_TRIAL_L7_BY_PLATFORM.get(DEFAULT_PLATFORM_KEY)
+        if raw is None:
+            raw = 15714000.0
+        return _format_amount_display(raw)
+
     def _update_extra_deposit_privilege_line(self) -> None:
         """儲值升級段落中「快速提款」金額＝即時錢包餘額（與 row_balance 同源）。"""
         if not hasattr(self, "_lbl_extra_deposit_privilege"):
@@ -1236,7 +1518,12 @@ class LoginApp:
             raw_bal = self._dashboard_data.get("balance", "—")
             withdraw_bal = format_wallet_balance_display(raw_bal)
             self._lbl_extra_deposit_privilege.config(
-                text=self._t("extra_deposit_privilege", withdraw_bal=withdraw_bal)
+                text=self._t(
+                    "extra_deposit_privilege",
+                    withdraw_bal=withdraw_bal,
+                    currency=wallet_currency_for_ui(),
+                    upgrade_amount=self._extra_deposit_upgrade_amount_display(),
+                )
             )
         except (tk.TclError, AttributeError):
             pass
@@ -1323,12 +1610,14 @@ class LoginApp:
                 balance=bal_s,
                 voucher_600k=v600_s,
                 quintuple_amt=qa_s,
+                currency=wallet_currency_for_ui(),
             )
             t3 = self._t(
                 "extra_turnover_para3",
                 win_rate=TURNOVER_WIN_RATE_PCT,
                 dep1=d1_s,
                 dep2=d2_s,
+                currency=wallet_currency_for_ui(),
             )
             for tw, txt in (
                 (self._txt_extra_turnover_para2, t2),
@@ -1563,26 +1852,36 @@ class LoginApp:
         wrap.pack(fill=tk.X, pady=(0, 8))
         self._show_login_media(wrap, panel_bg=panel_bg, fit_container_width=True)
 
-    def _main_outline_button(self, parent: tk.Frame, text: str, command, width: int = 10) -> tk.Button:
-        return tk.Button(
-            parent,
-            text=text,
-            command=command,
-            width=width,
-            font=(LOGIN_FONT_FAMILY, 9),
-            bg=MAIN_BTN_BG,
-            fg=MAIN_ACCENT,
-            activebackground=MAIN_BTN_ACTIVE_BG,
-            activeforeground=MAIN_ACCENT,
-            relief=tk.FLAT,
-            highlightthickness=1,
-            highlightbackground=MAIN_ACCENT,
-            highlightcolor=MAIN_ACCENT,
-            cursor="hand2",
-        )
+    def _main_outline_button(
+        self,
+        parent: tk.Frame,
+        text: str,
+        command,
+        width: int | None = None,
+    ) -> tk.Button:
+        """主畫面描邊按鈕。width=None 時依文字自動寬度，避免韓／德等長語系被固定字元寬截斷。"""
+        kw: dict = {
+            "text": text,
+            "command": command,
+            "font": (LOGIN_FONT_FAMILY, 9),
+            "bg": MAIN_BTN_BG,
+            "fg": MAIN_ACCENT,
+            "activebackground": MAIN_BTN_ACTIVE_BG,
+            "activeforeground": MAIN_ACCENT,
+            "relief": tk.FLAT,
+            "highlightthickness": 1,
+            "highlightbackground": MAIN_ACCENT,
+            "highlightcolor": MAIN_ACCENT,
+            "cursor": "hand2",
+            "padx": 10,
+            "pady": 4,
+        }
+        if width is not None:
+            kw["width"] = width
+        return tk.Button(parent, **kw)
 
     def _resize_tier_bonus_table_image(self, card_width: int) -> None:
-        """依即時資訊卡寬度縮放七階獎金表圖（data/VN.jpg），維持比例。"""
+        """依即時資訊卡寬度縮放七階獎金表圖（各國 data/{{國碼}}.jpg，見 resolve_tier_bonus_table_path），維持比例。"""
         if Image is None or ImageTk is None:
             return
         pil = getattr(self, "_tier_bonus_pil_src", None)
@@ -1620,6 +1919,28 @@ class LoginApp:
             anchor="w",
         ).pack(anchor="w")
 
+    def _apply_login_readonly_text_tags(
+        self,
+        w: tk.Text,
+        body: str,
+        *,
+        vnd_green: bool = False,
+        tag_note_from: str | None = None,
+    ) -> None:
+        if tag_note_from:
+            i = body.find(tag_note_from)
+            if i >= 0:
+                w.tag_configure("note", foreground=LOGIN_NOTE_ORANGE)
+                w.tag_add("note", f"1.0+{i}c", "end-1c")
+        if vnd_green:
+            w.tag_configure("vnd", foreground=LOGIN_REV_GREEN)
+            cc = wallet_currency_for_ui()
+            amt_cc = re.compile(rf"[\d.,]+\s+{re.escape(cc)}")
+            for m in amt_cc.finditer(body):
+                w.tag_add("vnd", f"1.0+{m.start()}c", f"1.0+{m.end()}c")
+            for m in re.finditer(r"\d[\d,]*萬", body):
+                w.tag_add("vnd", f"1.0+{m.start()}c", f"1.0+{m.end()}c")
+
     def _login_readonly_text(
         self,
         parent: tk.Frame,
@@ -1643,21 +1964,224 @@ class LoginApp:
             pady=8,
             cursor="arrow",
         )
-        t.insert("1.0", body or "—")
-        if tag_note_from:
-            i = body.find(tag_note_from)
-            if i >= 0:
-                t.tag_configure("note", foreground=LOGIN_NOTE_ORANGE)
-                t.tag_add("note", f"1.0+{i}c", "end-1c")
-        if vnd_green:
-            t.tag_configure("vnd", foreground=LOGIN_REV_GREEN)
-            # 繁中：120000／120,000 VND；越南文常為 120.000 VND、1.000.000 VND（千分位用點）
-            for m in re.finditer(r"[\d.,]+\s+VND", body):
-                t.tag_add("vnd", f"1.0+{m.start()}c", f"1.0+{m.end()}c")
-            for m in re.finditer(r"\d[\d,]*萬", body):
-                t.tag_add("vnd", f"1.0+{m.start()}c", f"1.0+{m.end()}c")
+        raw = body or "—"
+        t.insert("1.0", raw)
+        self._apply_login_readonly_text_tags(t, raw, vnd_green=vnd_green, tag_note_from=tag_note_from)
         t.config(state=tk.DISABLED)
         return t
+
+    def _replace_login_revenue_text(self, option4: float | None) -> None:
+        """登入頁「預計收益」依 Api/Information 的 option4 更新（與 _login_readonly_text 同色標）。"""
+        w = getattr(self, "_login_rev_text", None)
+        if not w:
+            return
+        try:
+            if not w.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        body = self._t("guide_revenue", **guide_revenue_i18n_kwargs(option4, wallet_currency_for_ui()))
+        raw = body or "—"
+        w.config(state=tk.NORMAL)
+        w.delete("1.0", tk.END)
+        w.insert("1.0", raw)
+        for tag in ("note", "vnd"):
+            try:
+                w.tag_delete(tag)
+            except tk.TclError:
+                pass
+        self._apply_login_readonly_text_tags(w, raw, vnd_green=True, tag_note_from=None)
+        w.config(state=tk.DISABLED)
+
+    def show_language_onboarding_frame(self) -> None:
+        """首次啟動：選國家／地區（旗幟 + 名稱），綁定介面語言與平台後進入帳密登入。"""
+        self.clear_frame()
+        apply_platform_key(DEFAULT_PLATFORM_KEY)
+        self.root.title(f"{UI_I18N[UI_LANG_DEFAULT]['app_title']} — v{APP_VERSION}")
+        self.root.configure(bg=LOGIN_UI_BG)
+        self.main_container.configure(bg=LOGIN_UI_BG)
+
+        outer = tk.Frame(self.main_container, bg=LOGIN_UI_BG)
+        outer.pack(expand=True, fill="both")
+
+        banner_host = tk.Frame(outer, bg=LOGIN_UI_BG)
+        banner_host.pack(fill=tk.X)
+        self._show_login_top_banner(banner_host)
+
+        tk.Label(
+            outer,
+            # text="選擇國家／地區\nSelect Country/Region",
+            text="Select Country/Region",
+            font=(LOGIN_FONT_FAMILY, 13, "bold"),
+            bg=LOGIN_UI_BG,
+            fg=LOGIN_FG,
+            justify="center",
+        ).pack(pady=(10, 6))
+        tk.Label(
+            outer,
+            # text="選擇後將套用對應介面語言與遊戲站台（各國連線見 data/platform.json）。",
+            font=(LOGIN_FONT_FAMILY, 9),
+            bg=LOGIN_UI_BG,
+            fg=LOGIN_FG_MUTED,
+            justify="center",
+        ).pack(pady=(0, 8))
+
+        scroll_wrap = tk.Frame(outer, bg=LOGIN_UI_BG)
+        scroll_wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 12))
+        canvas = tk.Canvas(scroll_wrap, bg=LOGIN_UI_BG, highlightthickness=0)
+        sb = tk.Scrollbar(scroll_wrap, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        scroll_inner = tk.Frame(canvas, bg=LOGIN_UI_BG)
+        cw = canvas.create_window((0, 0), window=scroll_inner, anchor="nw")
+
+        def _sync_scroll(_event: object | None = None) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            try:
+                w = canvas.winfo_width()
+                if w > 1:
+                    canvas.itemconfigure(cw, width=w)
+            except tk.TclError:
+                pass
+
+        scroll_inner.bind("<Configure>", lambda _e: _sync_scroll())
+        canvas.bind("<Configure>", lambda _e: _sync_scroll())
+
+        def _wheel(event: tk.Event) -> None:
+            try:
+                if not canvas.winfo_exists():
+                    return
+                if sys.platform == "darwin":
+                    canvas.yview_scroll(int(-1 * event.delta), "units")
+                else:
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                pass
+
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def commit_country(co: OnboardingCountry) -> None:
+            lang_code = normalize_ui_language(co.ui_language)
+            pk = normalize_platform_key(co.platform_key)
+            apply_platform_key(pk)
+            data = self.load_config()
+            data["ui_language"] = lang_code
+            data["platform"] = pk
+            data["onboarding_country"] = co.code
+            data["language_onboarding_done"] = True
+            try:
+                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4, ensure_ascii=False)
+            except OSError as e:
+                messagebox.showerror("Treasure Claw", str(e))
+                return
+            self.show_login_frame()
+
+        cols = 4
+        btn_kw: dict = {
+            "font": (LOGIN_FONT_FAMILY, 10),
+            "bg": LOGIN_CARD_BG,
+            "fg": LOGIN_FG,
+            "activebackground": LOGIN_BTN_BG_ACTIVE,
+            "activeforeground": "#ffffff",
+            "relief": tk.FLAT,
+            "highlightbackground": LOGIN_CARD_BORDER,
+            "highlightthickness": 1,
+            "cursor": "hand2",
+            "padx": 4,
+            "pady": 10,
+            "wraplength": 120,
+            "justify": tk.CENTER,
+        }
+        self._onboarding_flag_photos: list[object] = []
+
+        def _load_onboarding_flag_photo(alpha2: str) -> object | None:
+            """Pillow 載入 data/{{code}}-flag（.png/.jpg/.jpeg），縮小至約 64×48，疊色去棋盤格；失敗則 None。"""
+            p = resolve_onboarding_flag_image(alpha2)
+            if p is None or Image is None or ImageTk is None:
+                return None
+            try:
+                im = Image.open(p).convert("RGBA")
+                try:
+                    resample = Image.Resampling.LANCZOS
+                except AttributeError:
+                    resample = Image.LANCZOS  # type: ignore[attr-defined]
+                im.thumbnail((64, 48), resample)
+                im = _flatten_flag_rgba_on_card(im, LOGIN_CARD_BG)
+                return ImageTk.PhotoImage(image=im.convert("RGB"))
+            except OSError:
+                return None
+
+        for region_title, countries in ONBOARDING_REGIONS:
+            tk.Label(
+                scroll_inner,
+                text=region_title,
+                font=(LOGIN_FONT_FAMILY, 11, "bold"),
+                bg=LOGIN_UI_BG,
+                fg=MAIN_ACCENT,
+                anchor="w",
+            ).pack(anchor="w", fill=tk.X, pady=(14, 6))
+            grid = tk.Frame(scroll_inner, bg=LOGIN_UI_BG)
+            grid.pack(fill=tk.X)
+            r = 0
+            c = 0
+            for co in countries:
+                photo = _load_onboarding_flag_photo(co.code)
+                if photo is not None:
+                    self._onboarding_flag_photos.append(photo)
+                    b = tk.Button(
+                        grid,
+                        image=photo,
+                        text=f"（{co.label_zh}）",
+                        compound=tk.TOP,
+                        command=lambda ctry=co: commit_country(ctry),
+                        **{k: v for k, v in btn_kw.items() if k != "wraplength"},
+                    )
+                    b.grid(row=r, column=c, padx=3, pady=4, sticky="nsew")
+                else:
+                    # 無國旗圖檔：emoji 須用彩色字型，否則 JhengHei 會顯示成 IN、TH 等字母
+                    cell = tk.Frame(
+                        grid,
+                        bg=LOGIN_CARD_BG,
+                        highlightbackground=LOGIN_CARD_BORDER,
+                        highlightthickness=1,
+                        cursor="hand2",
+                        padx=4,
+                        pady=10,
+                    )
+
+                    def _pick_country(_e: tk.Event | None, ctry: OnboardingCountry = co) -> None:
+                        commit_country(ctry)
+
+                    em_font = _onboarding_emoji_font()
+                    em_lbl = tk.Label(
+                        cell,
+                        text=co.flag,
+                        font=em_font,
+                        bg=LOGIN_CARD_BG,
+                        fg=LOGIN_FG,
+                    )
+                    em_lbl.pack()
+                    name_lbl = tk.Label(
+                        cell,
+                        text=f"（{co.label_zh}）",
+                        font=(LOGIN_FONT_FAMILY, 10),
+                        bg=LOGIN_CARD_BG,
+                        fg=LOGIN_FG,
+                    )
+                    name_lbl.pack()
+                    for w in (cell, em_lbl, name_lbl):
+                        w.bind("<Button-1>", _pick_country)
+                    cell.grid(row=r, column=c, padx=3, pady=4, sticky="nsew")
+                c += 1
+                if c >= cols:
+                    c = 0
+                    r += 1
+            for i in range(cols):
+                grid.columnconfigure(i, weight=1, uniform="onboarding_country")
 
     def show_login_frame(self) -> None:
         self.clear_frame()
@@ -1778,16 +2302,21 @@ class LoginApp:
             fg=LOGIN_FG_MUTED,
             anchor="w",
         ).pack(side=tk.LEFT, padx=(0, 8))
-        _lang_by_label = {"繁體中文": "zh-tw", "Tiếng Việt": "vi"}
-        _label_by_lang = {"zh-tw": "繁體中文", "vi": "Tiếng Việt"}
-        _lang_labels = tuple(_lang_by_label.keys())
+        _combo = _lang_combo_entries()
+        if not _combo:
+            _combo = (
+                (LANG_DISPLAY_NAME.get(UI_LANG_DEFAULT, UI_LANG_DEFAULT), UI_LANG_DEFAULT),
+            )
+        _lang_by_label = {lab: c for lab, c in _combo}
+        _label_by_lang = {c: lab for lab, c in _combo}
+        _lang_labels = tuple(lab for lab, _ in _combo)
         lang_cb = ttk.Combobox(
             lang_row,
             state="readonly",
-            width=16,
+            width=24,
             values=_lang_labels,
         )
-        lang_cb.set(_label_by_lang.get(self._ui_lang, _lang_labels[0]))
+        lang_cb.set(_label_by_lang.get(self._ui_lang) or _lang_labels[0])
         lang_cb.pack(side=tk.LEFT)
 
         def on_lang_selected(_event: tk.Event | None = None) -> None:
@@ -1795,6 +2324,7 @@ class LoginApp:
             if code == self._ui_lang:
                 return
             self._ui_lang = code
+            # 僅切換介面語言，不覆寫平台（各國對應不同 guest_url／api_origin）
             self._persist_language_pref()
             self.show_login_frame()
 
@@ -1826,6 +2356,8 @@ class LoginApp:
                 return
             self._platform_key = apply_platform_key(key)
             self._persist_platform_pref()
+            # 與語言切換相同：重建登入頁，使幣別（wallet_currency_by_host）、預計收益（Api/Information / option4）等皆對應目前平台之 api_origin／訪客主機
+            self.show_login_frame()
 
         platform_cb.bind("<<ComboboxSelected>>", on_platform_selected)
 
@@ -1844,7 +2376,8 @@ class LoginApp:
         )
         login_btn.pack(fill=tk.X, pady=(12, 0))
 
-        system_txt, ops_txt, rev_txt = load_ui_guide_sections(self._ui_lang)
+        system_txt, ops_txt, _ = load_ui_guide_sections(self._ui_lang)
+        rev_txt = self._t("guide_revenue", **guide_revenue_i18n_kwargs(None, wallet_currency_for_ui()))
 
         self._login_section_header(sys_card, "🧠", self._t("section_system"))
         t_sys = self._login_readonly_text(
@@ -1859,6 +2392,23 @@ class LoginApp:
         self._login_section_header(rev_card, "💰", self._t("section_revenue"))
         t_rev = self._login_readonly_text(rev_card, rev_txt, height=8, vnd_green=True)
         t_rev.pack(fill=tk.X)
+        self._login_rev_text = t_rev
+        saved_u = (saved.get("username") or "").strip()
+        if saved_u:
+
+            def _fetch_option4_for_guide() -> None:
+                info = API.get_user_info(saved_u)
+                o4 = _parse_api_float(info.get("option4")) if info else None
+
+                def _apply() -> None:
+                    self._replace_login_revenue_text(o4)
+
+                try:
+                    self.root.after(0, _apply)
+                except tk.TclError:
+                    pass
+
+            threading.Thread(target=_fetch_option4_for_guide, daemon=True).start()
 
     def _report_download_account_async(self, username: str) -> None:
         """登入成功後向 openclawData 回報帳號與站台（目前作用中訪客頁），不阻塞介面。"""
@@ -1962,7 +2512,11 @@ class LoginApp:
             print(f"同步儀表板失敗: {e}")
 
     def _wallet_over_hope_amount(self, win_amount: int | None = None) -> bool:
-        """錢包餘額是否已達或超過希望金額（>=，僅在餘額可解析為數字時為 True）。"""
+        """錢包餘額是否已達或超過希望金額（>=，僅在餘額可解析為數字時為 True）。
+        洗碼等級（level ∈ TURNOVER_LEVELS）時不因希望金額停止遊戲，可持續玩至手動按停止。
+        """
+        if self._dashboard_turnover_mode():
+            return False
         if win_amount is None:
             win_amount = self._get_game_params()["win_amount"]
         bal = self._parse_balance_to_int(self._dashboard_data.get("balance"))
@@ -2044,11 +2598,20 @@ class LoginApp:
         if comm is None:
             return progress_str
         comm_s = f"{comm:,}"
-        return self._t("row_ref_commission_and_progress", commission=comm_s, progress=progress_str)
+        return self._t(
+            "row_ref_commission_and_progress",
+            commission=comm_s,
+            progress=progress_str,
+            currency=wallet_currency_for_ui(),
+        )
 
     def _build_share_lv1_block_text(self) -> str:
-        """分享區 LV1 儲值佣金區塊：依 COMMISSION_AMT_VND（API commissionAmt）。"""
-        dep_s = f"{SHARE_DEPOSIT_EXAMPLE_VND:,}"
+        """分享區 LV1 儲值佣金區塊：依 COMMISSION_AMT_VND（API commissionAmt）；下線儲值 {deposit} 優先 Api/Information 的 600k。"""
+        d = getattr(self, "_dashboard_data", {}) or {}
+        dep_amt = _parse_api_int(d.get("voucher_600k"))
+        if dep_amt is None:
+            dep_amt = SHARE_DEPOSIT_EXAMPLE_VND
+        dep_s = f"{dep_amt:,}"
         lines: list[str] = []
         for pct_key in COMMISSION_TIERS_ORDER:
             amt = COMMISSION_AMT_VND.get(pct_key)
@@ -2059,7 +2622,8 @@ class LoginApp:
                     "share_box_lv1_line",
                     pct=pct_key,
                     deposit=dep_s,
-                    commission=f"{amt:,}",
+                    commission=_format_amount_display(amt),
+                    currency=wallet_currency_for_ui(),
                 )
             )
         return "\n".join(lines) if lines else ""
@@ -2249,17 +2813,17 @@ class LoginApp:
 
         info_header = tk.Frame(info_row, bg=BG)
         info_header.pack(anchor="w", pady=(6, 0))
-        self._main_outline_button(info_header, self._t("btn_refresh"), self._refresh_dashboard, width=8).pack(
+        self._main_outline_button(info_header, self._t("btn_refresh"), self._refresh_dashboard).pack(
             side=tk.LEFT, padx=(0, 6)
         )
         self._btn_start_stop = self._main_outline_button(
-            info_header, self._t("btn_start"), self.toggle_start_stop, width=10
+            info_header, self._t("btn_start"), self.toggle_start_stop
         )
         self._btn_start_stop.pack(side=tk.LEFT, padx=(0, 6))
-        self._main_outline_button(info_header, self._t("btn_update"), self.check_update, width=10).pack(
+        self._main_outline_button(info_header, self._t("btn_update"), self.check_update).pack(
             side=tk.LEFT, padx=(0, 6)
         )
-        self._main_outline_button(info_header, self._t("btn_logout"), self.show_login_frame, width=8).pack(
+        self._main_outline_button(info_header, self._t("btn_logout"), self.show_login_frame).pack(
             side=tk.LEFT, padx=(0, 6)
         )
 
@@ -2601,12 +3165,20 @@ class LoginApp:
             self._update_bar_dark(bar_canvas, self._parse_pct(val))
 
         self._pack_share_lv1_block(share_bonus_card)
-        _sb_pack_paragraph(self._t("share_box_trial"), pady=(0, 8))
+        _sb_pack_paragraph(
+            self._t(
+                "share_box_trial",
+                currency=wallet_currency_for_ui(),
+                upgrade_amount=self._extra_deposit_upgrade_amount_display(),
+                trial_level7_total=self._share_box_trial_level7_display(),
+            ),
+            pady=(0, 8),
+        )
 
         self._tier_bonus_pil_src = None
         self._tier_bonus_photo_ref = None
         self._lbl_tier_bonus_img = None
-        img_path = resolve_data_asset(TIER_BONUS_TABLE_IMAGE)
+        img_path = resolve_tier_bonus_table_path()
         if img_path is not None and Image is not None:
             try:
                 self._tier_bonus_pil_src = Image.open(img_path).convert("RGBA")
@@ -3755,7 +4327,7 @@ class LoginApp:
             self.root.after(0, lambda: self._show_ai_dialog(20))
         time.sleep(20)
 
-        # 3. 玩五選1主遊戲：單次進入後持續 SPIN 直到錢包餘額>=希望金額（以 API balance／betCount 為準）
+        # 3. 玩五選1主遊戲：單次進入後持續 SPIN 直到錢包餘額>=希望金額（洗碼等級除外，可一直玩）
         #    有要玩遊戲時，領獎改在 _execute_play_game 內（登入／關廣告後、進遊戲前）執行
         ran_game_this_cycle = bool(self._driver and not skip_play_game)
         if params["claim_rewards"] and self._driver and not ran_game_this_cycle:
@@ -3779,14 +4351,14 @@ class LoginApp:
         # 樂透／輪盤已在步驟 2（AI 對話框期間）執行
 
     def _do_play_game(self) -> None:
-        """玩遊戲：進入後持續 SPIN 直到餘額達希望金額（或停止）。"""
+        """玩遊戲：進入後持續 SPIN 直到餘額達希望金額（洗碼等級除外）、或手動停止。"""
         try:
             self._execute_play_game()
         except Exception as e:
             print(f"玩遊戲錯誤: {e}")
 
     def _do_play_game_until_hope_met(self, win_amount: int, *, from_worker: bool = True) -> None:
-        """進入遊戲後一路打到錢包餘額>=希望金額，或收到停止／worker 結束。"""
+        """進入遊戲後一路 SPIN；一般等級打到餘額>=希望金額即停。洗碼等級（TURNOVER_LEVELS）則不因希望金額停止。"""
         if self._stop_requested:
             return
         if from_worker and not self._worker_running:
@@ -4097,8 +4669,8 @@ class LoginApp:
                     return
 
     def _execute_play_game(self) -> None:
-        """實際執行玩遊戲：開局前記錄 betCount，每局 SPIN 後輪詢 API，直到餘額達希望金額。
-        尚未達希望金額時，每完成 BROWSER_RESTART_EVERY_ROUNDS 局會關閉瀏覽器並重新進入遊戲（防斷線）。
+        """實際執行玩遊戲：開局前記錄 betCount，每局 SPIN 後輪詢 API，直到餘額達希望金額（洗碼等級則僅手動停止）。
+        每完成 BROWSER_RESTART_EVERY_ROUNDS 局會關閉瀏覽器並重新進入遊戲（防斷線）。
         停止鍵、瀏覽器關閉等結束條件與原先相同。
         """
         acc = self.userinfo.get("username", "")
@@ -4205,10 +4777,16 @@ class LoginApp:
                     return
 
                 hope_amt = self._get_game_params()["win_amount"]
-                print(
-                    f"[遊戲] 起始 betCount={baseline}，本輪目標：餘額達希望金額 {hope_amt:,}"
-                    f"（每 {BROWSER_RESTART_EVERY_ROUNDS} 局重啟瀏覽器直至達成）"
-                )
+                if self._dashboard_turnover_mode():
+                    print(
+                        f"[遊戲] 起始 betCount={baseline}，洗碼等級：不以希望金額 {hope_amt:,} 為停損，持續 SPIN 至手動停止"
+                        f"（每 {BROWSER_RESTART_EVERY_ROUNDS} 局可重啟瀏覽器防斷線）"
+                    )
+                else:
+                    print(
+                        f"[遊戲] 起始 betCount={baseline}，本輪目標：餘額達希望金額 {hope_amt:,}"
+                        f"（每 {BROWSER_RESTART_EVERY_ROUNDS} 局重啟瀏覽器直至達成）"
+                    )
 
                 jackpot_grid = CANVAS_JACKPOT_GRID_RECORDS
                 jackpot_confirm_recs = CANVAS_JACKPOT_CONFIRM_RECORDS
@@ -4294,7 +4872,9 @@ class LoginApp:
                             rounds_completed_this_browser += 1
                             if rounds_completed_this_browser >= BROWSER_RESTART_EVERY_ROUNDS:
                                 print(
-                                    f"[遊戲] 本瀏覽器已玩 {BROWSER_RESTART_EVERY_ROUNDS} 局仍未達希望金額，重啟瀏覽器以防斷線…"
+                                    f"[遊戲] 本瀏覽器已玩 {BROWSER_RESTART_EVERY_ROUNDS} 局"
+                                    f"{'（洗碼等級不檢希望金額）' if self._dashboard_turnover_mode() else '仍未達希望金額'}"
+                                    f"，重啟瀏覽器以防斷線…"
                                 )
                                 restart_after_100[0] = True
                                 return
@@ -4330,6 +4910,7 @@ class LoginApp:
         data["password"] = password
         data["ui_language"] = self._ui_lang
         data["platform"] = getattr(self, "_platform_key", DEFAULT_PLATFORM_KEY)
+        data["language_onboarding_done"] = True
         ha = self._normalize_hope_amount(data.get("hope_amount"))
         data["hope_amount"] = ha if ha is not None else WIN_DEFAULT
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -4342,8 +4923,11 @@ class LoginApp:
             "ui_language": UI_LANG_DEFAULT,
             "hope_amount": WIN_DEFAULT,
             "platform": DEFAULT_PLATFORM_KEY,
+            "language_onboarding_done": False,
+            "onboarding_country": "",
         }
-        if os.path.exists(CONFIG_FILE):
+        file_existed = os.path.exists(CONFIG_FILE)
+        if file_existed:
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     raw = json.load(f)
@@ -4351,9 +4935,16 @@ class LoginApp:
                     for k in ("username", "password", "ui_language", "hope_amount", "platform"):
                         if k in raw and raw[k] is not None:
                             base[k] = raw[k]
+                    if "onboarding_country" in raw:
+                        base["onboarding_country"] = str(raw["onboarding_country"] or "")
+                    if "language_onboarding_done" in raw:
+                        base["language_onboarding_done"] = bool(raw["language_onboarding_done"])
+                    else:
+                        # 舊版無此欄位：已有設定檔者視為已選過語言，避免強制重選
+                        base["language_onboarding_done"] = True
             except Exception:
                 pass
-        base["ui_language"] = self._normalize_ui_language(base.get("ui_language", UI_LANG_DEFAULT))
+        base["ui_language"] = normalize_ui_language(base.get("ui_language", UI_LANG_DEFAULT))
         base["platform"] = normalize_platform_key(base.get("platform", DEFAULT_PLATFORM_KEY))
         ha = self._normalize_hope_amount(base.get("hope_amount"))
         base["hope_amount"] = ha if ha is not None else WIN_DEFAULT
@@ -4361,16 +4952,17 @@ class LoginApp:
 
     def clear_frame(self) -> None:
         if self._main_scroll_canvas is not None:
-            try:
-                self.root.unbind_all("<MouseWheel>")
-            except Exception:
-                pass
-            try:
-                self.root.unbind_all("<Button-4>")
-                self.root.unbind_all("<Button-5>")
-            except Exception:
-                pass
             self._main_scroll_canvas = None
+        # 任何會 destroy main_container 的畫面切換前，必須解除 bind_all 的滾輪（含首次選國家頁的 Canvas）
+        try:
+            self.root.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+        try:
+            self.root.unbind_all("<Button-4>")
+            self.root.unbind_all("<Button-5>")
+        except Exception:
+            pass
         self._cancel_login_media()
         self._stop_in_game_ai_marquee()
         self._cancel_ai_fake_timers()
