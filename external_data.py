@@ -55,6 +55,7 @@ class ExternalBundles:
     commission_amt_vnd: dict[str, float]
     share_deposit_example_vnd: int
     share_box_trial_level7_by_platform: dict[str, float]
+    guide_revenue_option4_by_platform: dict[str, float]
     win_base: int
     win_default: int
     win_max: int
@@ -126,6 +127,15 @@ def load_external_bundles() -> ExternalBundles:
         for k, v in sbt.items():
             try:
                 share_box_trial_level7_by_platform[str(k)] = float(v)
+            except (TypeError, ValueError):
+                continue
+
+    gro = plat.get("guide_revenue_option4_by_platform")
+    guide_revenue_option4_by_platform: dict[str, float] = {}
+    if isinstance(gro, dict):
+        for k, v in gro.items():
+            try:
+                guide_revenue_option4_by_platform[str(k)] = float(v)
             except (TypeError, ValueError):
                 continue
 
@@ -205,6 +215,7 @@ def load_external_bundles() -> ExternalBundles:
         commission_amt_vnd=commission_amt_vnd,
         share_deposit_example_vnd=share_deposit_example_vnd,
         share_box_trial_level7_by_platform=share_box_trial_level7_by_platform,
+        guide_revenue_option4_by_platform=guide_revenue_option4_by_platform,
         win_base=win_base,
         win_default=win_default,
         win_max=win_max,

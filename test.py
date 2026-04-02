@@ -42,7 +42,6 @@ except ImportError:
 
 from version_info import APP_VERSION  # 版本號請改 version_info.py（與 launcher 共用）
 from external_data import load_external_bundles
-from app_update import check_and_apply_update, get_manifest_url
 
 _E = load_external_bundles()
 _t = _E.theme
@@ -91,6 +90,7 @@ COMMISSION_AMT_VND: dict[str, float] = dict(_E.commission_amt_vnd)
 SHARE_DEPOSIT_EXAMPLE_VND: int = _E.share_deposit_example_vnd
 # share_box_trial 第7層累積提領試算（依平台；見 platform.json share_box_trial_level7_cumulative）
 SHARE_BOX_TRIAL_L7_BY_PLATFORM: dict[str, float] = dict(_E.share_box_trial_level7_by_platform)
+GUIDE_REVENUE_OPTION4_BY_PLATFORM: dict[str, float] = dict(_E.guide_revenue_option4_by_platform)
 COMMISSION_TIERS_ORDER: tuple[str, ...] = ("30%", "20%", "10%", "4%", "3%", "2%", "1%")
 # Api/Information：特定等級時顯示洗碼／5 倍券敘述（比例尺用 turnoverRate）
 TURNOVER_LEVELS = frozenset({5, 8, 10, 12, 14, 16, 18, 20, 22})
@@ -119,6 +119,26 @@ def _parse_api_float(v: object) -> float | None:
         return None
 
 
+def _parse_turnover_rate_pct(raw: object) -> float | None:
+    """Api/Information 洗碼率；常見回傳如 '6%'（帶 % 字串），不可直接用 float()。"""
+    if raw is None or raw == "":
+        return None
+    s = str(raw).replace(",", "").replace(" ", "").strip()
+    if not s:
+        return None
+    while len(s) > 0 and (s.endswith("%") or s.endswith("\uff05")):  # 半形 %、全形 ％
+        s = s[:-1].strip()
+    try:
+        x = float(s)
+    except (ValueError, TypeError):
+        return None
+    if x != x:  # NaN
+        return None
+    if 0 < x <= 1.0:
+        return x * 100.0
+    return x
+
+
 def _format_amount_display(v: object) -> str:
     """金額顯示：千分位；整數不顯示小數，有小數時最多兩位並去掉尾隨 0。"""
     try:
@@ -133,8 +153,25 @@ def _format_amount_display(v: object) -> str:
     return s
 
 
-# guide_revenue：由 Api/Information 的 option4 推算（第 n 天 = option4*4*係數）；無效時沿用舊版對應基準（option4=200000）
+# guide_revenue：第 n 天 = option4*4*係數；option4 依平台見 platform.json guide_revenue_option4_by_platform
 GUIDE_REVENUE_OPTION4_DEFAULT = 200_000.0
+
+
+def _guide_revenue_option4_for_platform(platform_key: str | None) -> float:
+    """登入頁預計收益底數：依目前平台 key；缺漏時沿用 default_platform 或 200000。"""
+    pk = normalize_platform_key(platform_key or _ACTIVE_PLATFORM_KEY)
+    raw = GUIDE_REVENUE_OPTION4_BY_PLATFORM.get(pk)
+    if raw is None:
+        raw = GUIDE_REVENUE_OPTION4_BY_PLATFORM.get(DEFAULT_PLATFORM_KEY)
+    if raw is None:
+        return GUIDE_REVENUE_OPTION4_DEFAULT
+    try:
+        x = float(raw)
+    except (TypeError, ValueError):
+        return GUIDE_REVENUE_OPTION4_DEFAULT
+    if x != x or x <= 0:
+        return GUIDE_REVENUE_OPTION4_DEFAULT
+    return x
 
 
 def _guide_revenue_resolve_option4(option4: float | None) -> float:
@@ -717,13 +754,19 @@ class API:
             out["lottery_number"] = 0
 
         tr = api_data.get("turnoverRate")
-        out["turnover_rate_pct"] = _parse_api_float(tr) if tr is not None else None
+        if tr is None:
+            tr = api_data.get("TurnoverRate")
+        if tr is None:
+            tr = api_data.get("turnover_rate")
+        out["turnover_rate_pct"] = _parse_turnover_rate_pct(tr)
         out["quintuple_amt"] = _parse_api_int(api_data.get("QuintrupleAmt"))
         out["quintuple_deposit1"] = _parse_api_int(api_data.get("QuintrupleDeposit1"))
         out["quintuple_deposit2"] = _parse_api_int(api_data.get("QuintrupleDeposit2"))
         out["voucher_600k"] = _parse_api_int(api_data.get("600k"))
-        out["option4"] = _parse_api_float(api_data.get("option4"))
-        out["upgrade_amount"] = _parse_api_int(api_data.get("UpgradeAmount"))
+        ua = api_data.get("UpgradeAmount")
+        if ua is None:
+            ua = api_data.get("upgradeAmount")
+        out["upgrade_amount"] = _parse_api_int(ua)
         return out
 
     @staticmethod
@@ -1970,29 +2013,6 @@ class LoginApp:
         t.config(state=tk.DISABLED)
         return t
 
-    def _replace_login_revenue_text(self, option4: float | None) -> None:
-        """登入頁「預計收益」依 Api/Information 的 option4 更新（與 _login_readonly_text 同色標）。"""
-        w = getattr(self, "_login_rev_text", None)
-        if not w:
-            return
-        try:
-            if not w.winfo_exists():
-                return
-        except tk.TclError:
-            return
-        body = self._t("guide_revenue", **guide_revenue_i18n_kwargs(option4, wallet_currency_for_ui()))
-        raw = body or "—"
-        w.config(state=tk.NORMAL)
-        w.delete("1.0", tk.END)
-        w.insert("1.0", raw)
-        for tag in ("note", "vnd"):
-            try:
-                w.tag_delete(tag)
-            except tk.TclError:
-                pass
-        self._apply_login_readonly_text_tags(w, raw, vnd_green=True, tag_note_from=None)
-        w.config(state=tk.DISABLED)
-
     def show_language_onboarding_frame(self) -> None:
         """首次啟動：選國家／地區（旗幟 + 名稱），綁定介面語言與平台後進入帳密登入。"""
         self.clear_frame()
@@ -2356,7 +2376,7 @@ class LoginApp:
                 return
             self._platform_key = apply_platform_key(key)
             self._persist_platform_pref()
-            # 與語言切換相同：重建登入頁，使幣別（wallet_currency_by_host）、預計收益（Api/Information / option4）等皆對應目前平台之 api_origin／訪客主機
+            # 與語言切換相同：重建登入頁，使幣別（wallet_currency_by_host）、預計收益（guide_revenue_option4_by_platform）等皆對應目前平台
             self.show_login_frame()
 
         platform_cb.bind("<<ComboboxSelected>>", on_platform_selected)
@@ -2377,7 +2397,8 @@ class LoginApp:
         login_btn.pack(fill=tk.X, pady=(12, 0))
 
         system_txt, ops_txt, _ = load_ui_guide_sections(self._ui_lang)
-        rev_txt = self._t("guide_revenue", **guide_revenue_i18n_kwargs(None, wallet_currency_for_ui()))
+        _o4_rev = _guide_revenue_option4_for_platform(self._platform_key)
+        rev_txt = self._t("guide_revenue", **guide_revenue_i18n_kwargs(_o4_rev, wallet_currency_for_ui()))
 
         self._login_section_header(sys_card, "🧠", self._t("section_system"))
         t_sys = self._login_readonly_text(
@@ -2392,23 +2413,6 @@ class LoginApp:
         self._login_section_header(rev_card, "💰", self._t("section_revenue"))
         t_rev = self._login_readonly_text(rev_card, rev_txt, height=8, vnd_green=True)
         t_rev.pack(fill=tk.X)
-        self._login_rev_text = t_rev
-        saved_u = (saved.get("username") or "").strip()
-        if saved_u:
-
-            def _fetch_option4_for_guide() -> None:
-                info = API.get_user_info(saved_u)
-                o4 = _parse_api_float(info.get("option4")) if info else None
-
-                def _apply() -> None:
-                    self._replace_login_revenue_text(o4)
-
-                try:
-                    self.root.after(0, _apply)
-                except tk.TclError:
-                    pass
-
-            threading.Thread(target=_fetch_option4_for_guide, daemon=True).start()
 
     def _report_download_account_async(self, username: str) -> None:
         """登入成功後向 openclawData 回報帳號與站台（目前作用中訪客頁），不阻塞介面。"""
@@ -2820,9 +2824,6 @@ class LoginApp:
             info_header, self._t("btn_start"), self.toggle_start_stop
         )
         self._btn_start_stop.pack(side=tk.LEFT, padx=(0, 6))
-        self._main_outline_button(info_header, self._t("btn_update"), self.check_update).pack(
-            side=tk.LEFT, padx=(0, 6)
-        )
         self._main_outline_button(info_header, self._t("btn_logout"), self.show_login_frame).pack(
             side=tk.LEFT, padx=(0, 6)
         )
@@ -4189,59 +4190,6 @@ class LoginApp:
             print(f"關閉遊戲瀏覽器: {type(e).__name__}: {e}")
         self._driver = None
         self._wait = None
-
-    def check_update(self) -> None:
-        """檢查遠端清單並下載覆寫 test.py／version_info.py（與 launcher 相同邏輯）；成功後重新啟動程式。"""
-        root_dir = app_base_dir()
-        url = get_manifest_url(root_dir)
-        if not url:
-            messagebox.showinfo(
-                self._t("update_title"),
-                self._t("update_no_manifest_url"),
-            )
-            return
-
-        def worker() -> None:
-            try:
-                status, msg = check_and_apply_update(url)
-                self.root.after(0, lambda: self._check_update_ui_done(status, msg))
-            except Exception as e:
-                self.root.after(0, lambda: self._check_update_ui_done("error", str(e)))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _check_update_ui_done(self, status: str, msg: str) -> None:
-        try:
-            if status == "updated":
-                messagebox.showinfo(
-                    self._t("update_title"),
-                    self._t("update_success_restart", version=msg),
-                )
-                self._restart_application_after_update()
-            elif status == "latest":
-                messagebox.showinfo(
-                    self._t("update_title"),
-                    self._t("update_latest_detail", version=msg),
-                )
-            else:
-                messagebox.showerror(
-                    self._t("update_title"),
-                    self._t("update_failed_detail", detail=msg),
-                )
-        except tk.TclError:
-            pass
-
-    def _restart_application_after_update(self) -> None:
-        """覆寫檔案後以新行程取代目前行程（開發：python test.py；打包：同一路徑 exe）。"""
-        root_dir = app_base_dir()
-        try:
-            if getattr(sys, "frozen", False):
-                os.execv(sys.executable, [sys.executable])
-            else:
-                script = root_dir / "test.py"
-                os.execv(sys.executable, [sys.executable, str(script)])
-        except OSError as e:
-            print(f"[更新] 無法重新啟動: {e}")
 
     @staticmethod
     def _format_hms(total_sec: int) -> str:
