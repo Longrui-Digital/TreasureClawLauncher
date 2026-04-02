@@ -1,11 +1,11 @@
 {
-  "version": "1.1.1",
-  "download_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.1/test.py",
+  "version": "1.1.2",
+  "download_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.2/test.py",
   "sha256": "",
-  "version_info_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.1/version_info.py",
+  "version_info_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.2/version_info.py",
   "version_info_sha256": "",
   "extra_files": [
-    { "path": "external_data.py", "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.1/external_data.py", "sha256": "" },
-    { "path": "data/platform.json", "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.1/platform.json", "sha256": "" }
+    { "path": "external_data.py", "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.2/external_data.py", "sha256": "" },
+    { "path": "data/platform.json", "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.1.2/platform.json", "sha256": "" }
   ]
 }

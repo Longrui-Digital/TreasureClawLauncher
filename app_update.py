@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import tempfile
 import time
 from pathlib import Path
@@ -52,7 +53,7 @@ def install_root() -> Path:
 def app_bundle_root() -> Path:
     """實際載入／覆寫 test.py、version_info.py 的目錄。打包後即 PyInstaller _MEIPASS（_internal）。"""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS)
+        return Path(getattr(sys, "_MEIPASS"))
     return Path(__file__).resolve().parent
 
 
@@ -477,13 +478,78 @@ def check_and_apply_update(manifest_url: str) -> tuple[str, str]:
     return ("updated", remote_ver)
 
 
+def _launcher_apply_download_steps(man: dict) -> tuple[bool, bool]:
+    """下載並套用更新（test.py、extra、version_info）。回傳 (test.py 成功, 附加檔成功)。"""
+    if not apply_update_test_py(man):
+        return (False, True)
+    if not apply_extra_files(man):
+        return (True, False)
+    apply_update_version_info(man)
+    sync_version_info_from_manifest(man)
+    return (True, True)
+
+
+def _launcher_update_with_wait_window(man: dict) -> tuple[bool, bool]:
+    """顯示 indeterminate 進度條與「請稍候」，背景執行更新；結束後關閉視窗。回傳同 _launcher_apply_download_steps。"""
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except ImportError:
+        raise
+
+    result: dict[str, Any] = {
+        "test_py": True,
+        "extra": True,
+        "exc": None,
+    }
+
+    app = tk.Tk()
+    app.title("TreasureClaw")
+    app.resizable(False, False)
+    app.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    frm = ttk.Frame(app, padding=20)
+    frm.pack(fill=tk.BOTH, expand=True)
+    ttk.Label(frm, text="請稍候").pack(anchor=tk.W)
+    pb = ttk.Progressbar(frm, mode="indeterminate", length=300)
+    pb.pack(pady=(8, 0))
+    pb.start(10)
+
+    def worker() -> None:
+        try:
+            ok_py, ok_ex = _launcher_apply_download_steps(man)
+            result["test_py"] = ok_py
+            result["extra"] = ok_ex
+        except Exception as e:
+            result["exc"] = e
+        finally:
+
+            def close() -> None:
+                try:
+                    pb.stop()
+                except tk.TclError:
+                    pass
+                try:
+                    app.destroy()
+                except tk.TclError:
+                    pass
+
+            app.after(0, close)
+
+    threading.Thread(target=worker, daemon=True).start()
+    app.mainloop()
+    if result["exc"] is not None:
+        raise result["exc"]
+    return (bool(result["test_py"]), bool(result["extra"]))
+
+
 def launch_main_script(root: Path) -> int:
     """啟動主程式 test.py。開發模式用 python 子行程；PyInstaller 打包後 sys.executable 為 exe，改以 runpy 同程序載入。"""
     main = resolve_main_script_path(root)
     if main is None:
         extra = ""
         if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            extra = f" 或 {Path(sys._MEIPASS) / MAIN_SCRIPT}"
+            extra = f" 或 {Path(getattr(sys, '_MEIPASS')) / MAIN_SCRIPT}"
         _fatal_msg(
             root,
             "TreasureClawLauncher",
@@ -574,14 +640,16 @@ def _launcher_main_impl(root: Path) -> int:
         return launch_main_script(root)
 
     print(f"[更新] 發現新版本 {remote_ver} (目前 {local_ver})")
-    if not apply_update_test_py(man):
+    try:
+        ok_py, ok_ex = _launcher_update_with_wait_window(man)
+    except ImportError:
+        ok_py, ok_ex = _launcher_apply_download_steps(man)
+    if not ok_py:
         print("[啟動] 更新失敗，仍嘗試啟動目前版本")
         return launch_main_script(root)
-    if not apply_extra_files(man):
+    if not ok_ex:
         print("[啟動] 附加檔案更新失敗，仍嘗試啟動目前版本")
         return launch_main_script(root)
-    apply_update_version_info(man)
-    sync_version_info_from_manifest(man)
     return launch_main_script(root)
 
 
