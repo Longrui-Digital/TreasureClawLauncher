@@ -19,7 +19,6 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import tempfile
 import time
 from pathlib import Path
@@ -53,7 +52,7 @@ def install_root() -> Path:
 def app_bundle_root() -> Path:
     """實際載入／覆寫 test.py、version_info.py 的目錄。打包後即 PyInstaller _MEIPASS（_internal）。"""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS)
+        return Path(getattr(sys, "_MEIPASS"))
     return Path(__file__).resolve().parent
 
 
@@ -484,7 +483,7 @@ def launch_main_script(root: Path) -> int:
     if main is None:
         extra = ""
         if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            extra = f" 或 {Path(sys._MEIPASS) / MAIN_SCRIPT}"
+            extra = f" 或 {Path(getattr(sys, '_MEIPASS')) / MAIN_SCRIPT}"
         _fatal_msg(
             root,
             "TreasureClawLauncher",
