@@ -1,4 +1,5 @@
 from __future__ import annotations
+# pyright: reportGeneralTypeIssues=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportInvalidTypeForm=false, reportArgumentType=false, reportOperatorIssue=false
 
 import json
 import os
