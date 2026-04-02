@@ -102,7 +102,7 @@ TURNOVER_LEVELS = frozenset({5, 8, 10, 12, 14, 16, 18, 20, 22})
 TURNOVER_WIN_RATE_PCT = "97.5"
 WALLET_CURRENCY_BY_HOST: dict[str, str] = _E.wallet_currency_by_host
 
-print('')
+
 def _parse_api_int(v: object) -> int | None:
     if v is None or v == "":
         return None

@@ -590,3 +590,4 @@ if __name__ == "__main__":
         sys.exit(launcher_main())
     except KeyboardInterrupt:
         sys.exit(130)
+print('')
