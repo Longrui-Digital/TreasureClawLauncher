@@ -89,8 +89,13 @@ RECOMMEND_AMT_VND: dict[int, int] = dict(REF_REFERRAL_COMMISSION_VND)
 COMMISSION_AMT_VND: dict[str, float] = dict(_E.commission_amt_vnd)
 SHARE_DEPOSIT_EXAMPLE_VND: int = _E.share_deposit_example_vnd
 # share_box_trial 第7層累積提領試算（依平台；見 platform.json share_box_trial_level7_cumulative）
-SHARE_BOX_TRIAL_L7_BY_PLATFORM: dict[str, float] = dict(_E.share_box_trial_level7_by_platform)
-GUIDE_REVENUE_OPTION4_BY_PLATFORM: dict[str, float] = dict(_E.guide_revenue_option4_by_platform)
+# getattr：舊版 exe 內建 external_data 無此欄位時，與新版 test.py 並存不崩潰（應一併發佈 external_data.py）
+SHARE_BOX_TRIAL_L7_BY_PLATFORM: dict[str, float] = dict(
+    getattr(_E, "share_box_trial_level7_by_platform", {})
+)
+GUIDE_REVENUE_OPTION4_BY_PLATFORM: dict[str, float] = dict(
+    getattr(_E, "guide_revenue_option4_by_platform", {})
+)
 COMMISSION_TIERS_ORDER: tuple[str, ...] = ("30%", "20%", "10%", "4%", "3%", "2%", "1%")
 # Api/Information：特定等級時顯示洗碼／5 倍券敘述（比例尺用 turnoverRate）
 TURNOVER_LEVELS = frozenset({5, 8, 10, 12, 14, 16, 18, 20, 22})
