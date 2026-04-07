@@ -25,6 +25,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import (
+    NoAlertPresentException,
     NoSuchElementException,
     NoSuchWindowException,
     StaleElementReferenceException,
@@ -2486,7 +2487,6 @@ class LoginApp:
             "open_threads": self._var_open_threads.get(),
             "open_whatsapp": self._var_open_whatsapp.get(),
             "play_lottery": self._var_play_lottery.get(),
-            # "play_roulette": self._var_play_roulette.get(),
             "claim_rewards": self._var_claim_rewards.get(),
         }
 
@@ -3401,14 +3401,6 @@ class LoginApp:
         account_info_card.bind("<Configure>", _sync_dash_value_wrap)
         self.root.after_idle(lambda: _sync_dash_value_wrap(None))
 
-        # self._var_play_roulette = tk.BooleanVar(value=False)
-        # tk.Checkbutton(
-        #     param_frame,
-        #     text=self._t("chk_roulette"),
-        #     variable=self._var_play_roulette,
-        #     state="disabled",
-        #     **cb_dis_kw,
-        # ).grid(row=4, column=1, sticky="w", pady=2)
         # 「每小時玩樂透」「協助提領獎金」勾選已移至訊息框下方資訊欄
 
         if self._refresh_job:
@@ -3510,12 +3502,9 @@ class LoginApp:
             self._t("ai_msg_connecting", name=ai_name),
             self._t("ai_msg_history", name=ai_name),
             self._t("ai_msg_timing", name=ai_name),
-            self._t("ai_msg_roulette_ev", name=ai_name),
         ]
         if p.get("play_lottery"):
             msgs.append(self._t("ai_msg_lottery", name=ai_name))
-        if p.get("play_roulette"):
-            msgs.append(self._t("ai_msg_roulette_enter", name=ai_name))
         msgs.extend(
             [
                 self._t("ai_msg_conservative", name=ai_name),
@@ -4255,7 +4244,7 @@ class LoginApp:
                 pass
 
     def _run_one_cycle(self) -> None:
-        """執行一輪：檢查贏額→AI對話期間樂透/輪盤→（玩遊戲前領獎）→玩遊戲→FB/IG/Threads"""
+        """執行一輪：檢查贏額→AI對話期間樂透→（玩遊戲前領獎）→玩遊戲→FB/IG/Threads"""
         self._sync_dashboard_from_api()
         params = self._get_game_params()
 
@@ -4266,16 +4255,14 @@ class LoginApp:
                 f"[週期] 錢包餘額 {format_wallet_balance_display(self._dashboard_data.get('balance', '—'))} 已達或超過希望金額 {win_amount}，跳過玩遊戲"
             )
 
-        # 2. 假裝詢問 AI（20秒）期間，背景執行樂透／輪盤
-        def lottery_roulette_during_ai() -> None:
+        # 2. 假裝詢問 AI（20秒）期間，背景執行樂透
+        def lottery_during_ai() -> None:
             if not self._worker_running:
                 return
             if params["play_lottery"]:
                 self._do_play_lottery()
-            if params["play_roulette"] and self._driver:
-                self._do_play_roulette_once()
 
-        threading.Thread(target=lottery_roulette_during_ai, daemon=True).start()
+        threading.Thread(target=lottery_during_ai, daemon=True).start()
         if self.root.winfo_exists():
             self.root.after(0, lambda: self._show_ai_dialog(20))
         time.sleep(20)
@@ -4301,7 +4288,7 @@ class LoginApp:
         if params["open_whatsapp"] and self._driver:
             pass  # TODO: Whatsapp 分享
 
-        # 樂透／輪盤已在步驟 2（AI 對話框期間）執行
+        # 樂透已在步驟 2（AI 對話框期間）執行
 
     def _do_play_game(self) -> None:
         """玩遊戲：進入後持續 SPIN 直到餘額達希望金額（洗碼等級除外）、或手動停止。"""
@@ -4433,11 +4420,6 @@ class LoginApp:
         result = API.lottery_bet(username, number)
         self._save_lottery_record(username, current_hour)
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 玩樂透：下注號碼 {number}")
-
-    def _do_play_roulette_once(self) -> None:
-        """玩一次輪盤"""
-        # TODO: 可呼叫現有輪盤邏輯一次
-        print("玩輪盤一次...")
 
     def open_platform(self, skip_site_login: bool = False) -> bool:
         """登入網站後停下來，保留瀏覽器不關閉。成功回傳 True；帳密錯誤回傳 False 並已處理 UI。
@@ -4690,9 +4672,11 @@ class LoginApp:
                 fullscreen_p.click()
                 time.sleep(4)
 
-                alert = driver.switch_to.alert
-                alert.dismiss()
-                # print("已成功點擊彈窗的『取消』")
+                # 部分 Chrome／站台組合不會出現 JS alert，直接 dismiss 會 no such alert
+                try:
+                    driver.switch_to.alert.dismiss()
+                except NoAlertPresentException:
+                    pass
 
                 time.sleep(12)
                 wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gameIframe")))
