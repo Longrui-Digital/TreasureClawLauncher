@@ -79,8 +79,8 @@ FACEBOOK_COOKIES_FILE = "facebook_cookies.json"
 FB_REGISTRATION_RECORD_FILE = "fb_registration_record.json"
 # FB 註冊：本機任意一次執行後，須間隔至少此秒數才會再跑（不分平台帳號）；目前為 3 小時
 FB_REGISTRATION_INTERVAL_SEC = 3 * 60 * 60  # 10800 秒
-# 登入／主畫面頂部媒體：GIF 檔名（實際路徑為 data/ 下，見 resolve_data_asset）
-LOGIN_MEDIA_CANDIDATES = ("VN.gif",)
+# 登入／主畫面頂部 GIF：見 _login_gif_filename_for_country（CA→EN.gif；CO/MX/PH→ES.gif；其餘如 TH.gif、ZA.gif）
+LOGIN_MEDIA_FALLBACK_GIF = "VN.gif"
 # 七階獎金說明下方表格圖：預設檔名；各國見 data/{{國碼}}.jpg（resolve_tier_bonus_table_path）
 TIER_BONUS_TABLE_IMAGE = "VN.jpg"
 # 主題色見 data/theme.json；平台／金額見 data/platform.json
@@ -347,7 +347,7 @@ def bundled_resources_dir() -> Path:
 
 
 def resolve_data_asset(filename: str) -> Path | None:
-    """取得 data/ 內資源（openclaw.ico、VN.gif、VN.jpg 等）：先 exe／腳本同層 data/，再 PyInstaller 內建 data/。"""
+    """取得 data/ 內資源（openclaw.ico、TH.gif、VN.jpg 等）：先 exe／腳本同層 data/，再 PyInstaller 內建 data/。"""
     name = (filename or "").strip().replace("\\", "/").lstrip("/")
     if not name or ".." in name.split("/"):
         return None
@@ -580,6 +580,20 @@ def _tier_bonus_country_for_platform_key(pk: str) -> str | None:
             if co.platform_key == s:
                 return co.code.lower()
     return None
+
+
+def _login_gif_filename_for_country(alpha2: str) -> str | None:
+    """onboarding 兩字國碼 → data/ 內登入 GIF 檔名（CA→EN.gif；CO/MX/PH→ES.gif；其餘 {國碼}.gif）。"""
+    u = (alpha2 or "").strip().lower()
+    if len(u) != 2 or not u.isalpha():
+        return None
+    stem_by_cc: dict[str, str] = {
+        "ca": "EN",
+        "co": "ES",
+        "mx": "ES",
+        "ph": "ES",
+    }
+    return f"{stem_by_cc.get(u, u.upper())}.gif"
 
 
 def resolve_tier_bonus_table_path() -> Path | None:
@@ -1709,8 +1723,34 @@ class LoginApp:
             self._login_gif_box = None
         self._login_gif_last_layout_w = 0
 
+    def _login_gif_candidates(self) -> tuple[str, ...]:
+        """依目前選擇之平台鍵 → 國碼 GIF；再備援 config onboarding_country；最後 LOGIN_MEDIA_FALLBACK_GIF。"""
+        pk = normalize_platform_key(getattr(self, "_platform_key", DEFAULT_PLATFORM_KEY))
+        ordered: list[str] = []
+        cc = _tier_bonus_country_for_platform_key(pk)
+        if cc:
+            gn = _login_gif_filename_for_country(cc)
+            if gn:
+                ordered.append(gn)
+        cfg: dict = {}
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                raw = json.load(f)
+                if isinstance(raw, dict):
+                    cfg = raw
+        except (OSError, json.JSONDecodeError):
+            pass
+        oc = str(cfg.get("onboarding_country") or "").strip().lower()
+        if oc:
+            g = _login_gif_filename_for_country(oc)
+            if g and g not in ordered:
+                ordered.append(g)
+        if LOGIN_MEDIA_FALLBACK_GIF not in ordered:
+            ordered.append(LOGIN_MEDIA_FALLBACK_GIF)
+        return tuple(ordered)
+
     def _pick_login_media_path(self) -> Path | None:
-        for name in LOGIN_MEDIA_CANDIDATES:
+        for name in self._login_gif_candidates():
             p = resolve_data_asset(name)
             if p is not None:
                 return p
@@ -1780,7 +1820,7 @@ class LoginApp:
         max_thumb_h: int = 270,
         fit_container_width: bool = False,
     ) -> None:
-        """頂部橫幅：循環播放 LOGIN_MEDIA_CANDIDATES 的 GIF（僅 Pillow）。"""
+        """頂部橫幅：循環播放 data/ 內國碼 GIF（見 _login_gif_candidates）（僅 Pillow）。"""
         self._cancel_login_media()
         media_path = self._pick_login_media_path()
         box = tk.Frame(parent, bg=panel_bg)
@@ -1888,7 +1928,7 @@ class LoginApp:
         self._start_login_gif_tick(lbl)
 
     def _show_login_top_banner(self, parent: tk.Frame) -> None:
-        """登入頁頂部：循環播放 data/ 內 GIF（如 VN.gif）"""
+        """登入頁頂部：循環播放 data/ 內 GIF（如 TH.gif、ZA.gif；依平台國碼）"""
         self._login_banner_photo = None
         wrap = tk.Frame(parent, bg=LOGIN_UI_BG)
         wrap.pack(fill=tk.X)

@@ -15,14 +15,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import queue
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 try:
@@ -228,20 +231,271 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def download(url: str, dest_path: Path) -> bool:
+def _probe_url_content_length(url: str) -> int | None:
+    """HEAD 取得 Content-Length（供整體百分比加總）；失敗則回傳 None。"""
+    if requests is None:
+        return None
+    try:
+        r = requests.head(url.strip(), timeout=15, allow_redirects=True)
+        cl = r.headers.get("Content-Length")
+        if cl is not None and str(cl).strip().isdigit():
+            n = int(cl)
+            return n if n > 0 else None
+    except Exception:
+        pass
+    return None
+
+
+def _download_to_path_stream(
+    url: str,
+    dest_path: Path,
+    on_chunk: Callable[[int, int | None], None] | None,
+) -> bool:
+    """串流下載至 dest_path；每個 chunk 呼叫 on_chunk(len, total_or_none)。"""
     if requests is None:
         return False
     try:
-        with requests.get(url, stream=True, timeout=120) as r:
+        with requests.get(url.strip(), stream=True, timeout=120) as r:
             r.raise_for_status()
+            total: int | None = None
+            cl = r.headers.get("Content-Length")
+            if cl is not None and str(cl).strip().isdigit():
+                t = int(cl)
+                total = t if t > 0 else None
             with open(dest_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024 * 256):
+                for chunk in r.iter_content(chunk_size=256 * 1024):
                     if chunk:
                         f.write(chunk)
+                        if on_chunk is not None:
+                            on_chunk(len(chunk), total)
         return True
     except Exception as e:
         print(f"[更新] 下載失敗: {e}", file=sys.stderr)
         return False
+
+
+def download(url: str, dest_path: Path) -> bool:
+    return _download_to_path_stream(url, dest_path, None)
+
+
+def _launcher_apply_manifest_with_progress(
+    man: dict[str, Any],
+    on_percent: Callable[[float], None],
+) -> bool:
+    """下載並套用清單（與 apply_update_* 相同語意）；on_percent(0..100)。"""
+    if requests is None:
+        return False
+
+    def report(p: float) -> None:
+        on_percent(min(100.0, max(0.0, p)))
+
+    u_main = str(man.get("download_url") or man.get("url") or "").strip()
+    if not u_main:
+        print("[更新] 清單缺少 download_url", file=sys.stderr)
+        return False
+
+    br = app_bundle_root()
+    expect_main = str(man.get("sha256") or "").strip().lower()
+
+    extra_items: list[dict[str, Any]] = []
+    raw = man.get("extra_files")
+    if raw is not None:
+        if not isinstance(raw, list):
+            print("[更新] extra_files 必須為陣列", file=sys.stderr)
+            return False
+        extra_items = [x for x in raw if isinstance(x, dict)]
+
+    vi_url = str(man.get("version_info_url") or "").strip()
+    vi_hash = str(man.get("version_info_sha256") or "").strip().lower()
+
+    urls: list[str] = [u_main]
+    for it in extra_items:
+        u = str(it.get("url") or "").strip()
+        if u:
+            urls.append(u)
+    if vi_url:
+        urls.append(vi_url)
+
+    sizes: list[int | None] = [_probe_url_content_length(u) for u in urls]
+    all_known = all(s is not None and s > 0 for s in sizes)
+    total_bytes = sum(int(s) for s in sizes if s is not None and s > 0) if sizes else 0
+
+    n_files = len(urls)
+    bytes_done_global = 0
+
+    # 若無法加總 HEAD 總位元組：每檔佔 100/n，檔內依 Content-Length 或漸進估計
+    per_file_read: dict[int, int] = {}
+
+    def make_file_progress(idx: int) -> Callable[[int, int | None], None]:
+        def _cb(n: int, ft: int | None) -> None:
+            per_file_read[idx] = per_file_read.get(idx, 0) + n
+            r = per_file_read[idx]
+            if all_known and total_bytes > 0:
+                return
+            base = (100.0 / n_files) * idx
+            span = 100.0 / n_files
+            if ft and ft > 0:
+                frac = min(1.0, r / ft)
+            else:
+                frac = min(0.92, 1.0 - math.exp(-r / max(400_000.0, 1.0)))
+            report(base + span * frac)
+
+        return _cb
+
+    report(0.0)
+
+    # --- test.py ---
+    fd, tmp_main = tempfile.mkstemp(prefix="upd_", suffix=".py", dir=str(br))
+    os.close(fd)
+    tmp_main = Path(tmp_main)
+    try:
+        cb0 = make_file_progress(0)
+        if not all_known or not total_bytes:
+            ok_dl = _download_to_path_stream(u_main, tmp_main, cb0)
+        else:
+
+            def cb_byte(n: int, _t: int | None) -> None:
+                nonlocal bytes_done_global
+                bytes_done_global += n
+                report(99.0 * bytes_done_global / total_bytes)
+
+            ok_dl = _download_to_path_stream(u_main, tmp_main, cb_byte)
+        if not ok_dl:
+            return False
+        if expect_main and sha256_file(tmp_main) != expect_main:
+            print("[更新] SHA256 不符，已中止覆寫", file=sys.stderr)
+            try:
+                tmp_main.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+        os.replace(tmp_main, br / MAIN_SCRIPT)
+        print(f"[更新] 已更新 {MAIN_SCRIPT}")
+    finally:
+        if tmp_main.is_file():
+            try:
+                tmp_main.unlink()
+            except OSError:
+                pass
+
+    if all_known and total_bytes > 0:
+        report(99.0 * bytes_done_global / total_bytes)
+    else:
+        report(100.0 / n_files)
+
+    url_idx = 1
+
+    for i, item in enumerate(extra_items):
+        rel = _safe_bundle_relative_path(str(item.get("path") or ""))
+        if rel is None:
+            print(f"[更新] extra_files[{i}] path 非法或為空", file=sys.stderr)
+            return False
+        u = str(item.get("url") or "").strip()
+        if not u:
+            print(f"[更新] extra_files[{i}] 缺少 url", file=sys.stderr)
+            return False
+        expect_hash = str(item.get("sha256") or "").strip().lower()
+        base = _extra_files_write_base(rel)
+        base_resolved = base.resolve()
+        dest = (base / rel).resolve()
+        try:
+            dest.relative_to(base_resolved)
+        except ValueError:
+            print(f"[更新] extra_files[{i}] path 超出允許目錄", file=sys.stderr)
+            return False
+        parent = dest.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        fd2, tmp_path = tempfile.mkstemp(prefix="ext_", suffix=".part", dir=str(parent))
+        os.close(fd2)
+        tmp_path = Path(tmp_path)
+        try:
+            cbi = make_file_progress(url_idx)
+            if all_known and total_bytes > 0:
+
+                def cb_byte2(n: int, _t: int | None) -> None:
+                    nonlocal bytes_done_global
+                    bytes_done_global += n
+                    report(99.0 * bytes_done_global / total_bytes)
+
+                ok_dl = _download_to_path_stream(u, tmp_path, cb_byte2)
+            else:
+                ok_dl = _download_to_path_stream(u, tmp_path, cbi)
+            if not ok_dl:
+                return False
+            if expect_hash and sha256_file(tmp_path) != expect_hash:
+                print(f"[更新] extra_files[{i}] SHA256 不符，已中止", file=sys.stderr)
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return False
+            if rel.name == "external_data.py":
+                try:
+                    text = tmp_path.read_text(encoding="utf-8", errors="replace")
+                except OSError as e:
+                    print(f"[更新] extra_files[{i}] 無法讀取暫存檔: {e}", file=sys.stderr)
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return False
+                if "def load_external_bundles" not in text:
+                    print(
+                        f"[更新] extra_files[{i}] external_data.py 與主程式不相容（缺少 load_external_bundles），已中止覆寫",
+                        file=sys.stderr,
+                    )
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return False
+            os.replace(tmp_path, dest)
+            print(f"[更新] 已更新 {rel.as_posix()}")
+        finally:
+            if tmp_path.is_file():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+        url_idx += 1
+        if all_known and total_bytes > 0:
+            report(99.0 * bytes_done_global / total_bytes)
+        else:
+            report((100.0 / n_files) * url_idx)
+
+    if vi_url:
+        fd3, tmp_v = tempfile.mkstemp(prefix="ver_", suffix=".py", dir=str(br))
+        os.close(fd3)
+        tmp_v = Path(tmp_v)
+        try:
+            cbi = make_file_progress(url_idx)
+            if all_known and total_bytes > 0:
+
+                def cb_byte3(n: int, _t: int | None) -> None:
+                    nonlocal bytes_done_global
+                    bytes_done_global += n
+                    report(99.0 * bytes_done_global / total_bytes)
+
+                ok_v = _download_to_path_stream(vi_url, tmp_v, cb_byte3)
+            else:
+                ok_v = _download_to_path_stream(vi_url, tmp_v, cbi)
+            if not ok_v:
+                pass
+            elif vi_hash and sha256_file(tmp_v) != vi_hash:
+                print("[更新] version_info.py SHA256 不符，略過", file=sys.stderr)
+            else:
+                os.replace(tmp_v, br / VERSION_MODULE)
+                print(f"[更新] 已更新 {VERSION_MODULE}")
+        finally:
+            if tmp_v.is_file():
+                try:
+                    tmp_v.unlink()
+                except OSError:
+                    pass
+
+    sync_version_info_from_manifest(man)
+    report(100.0)
+    return True
 
 
 def apply_update_test_py(manifest: dict[str, Any]) -> bool:
@@ -525,6 +779,116 @@ def launch_main_script(root: Path) -> int:
     return subprocess.call([sys.executable, str(main)], cwd=str(root))
 
 
+def _show_update_done_dialog(remote_ver: str) -> None:
+    """更新成功後提示，使用者按確定後再啟動主程式。"""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        r = tk.Tk()
+        r.withdraw()
+        messagebox.showinfo(
+            "TreasureClaw",
+            f"更新完成。\n版本：{remote_ver}\n\n請按確定啟動主程式。",
+            parent=r,
+        )
+        r.destroy()
+    except Exception:
+        pass
+
+
+def _launcher_update_with_progress_ui(
+    root: Path,
+    man: dict[str, Any],
+    local_ver: str,
+    remote_ver: str,
+) -> int:
+    """顯示可反映下載量的百分比進度；完成後彈窗，按確定後啟動 test.py。"""
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+        from tkinter import messagebox
+    except ImportError:
+        print("[更新] 無法顯示進度（缺少 tkinter），改為無視窗下載")
+        if not _launcher_apply_manifest_with_progress(man, lambda _p: None):
+            print("[啟動] 更新失敗，仍嘗試啟動目前版本")
+            return launch_main_script(root)
+        _show_update_done_dialog(remote_ver)
+        return launch_main_script(root)
+
+    q: queue.Queue[tuple[str, Any]] = queue.Queue()
+    result_ok: list[bool | None] = [None]
+
+    def worker() -> None:
+        try:
+            ok = _launcher_apply_manifest_with_progress(
+                man,
+                lambda p: q.put(("progress", float(p))),
+            )
+            result_ok[0] = ok
+            q.put(("done", ok))
+        except Exception as e:
+            print(f"[更新] 套用失敗: {e}", file=sys.stderr)
+            result_ok[0] = False
+            q.put(("done", False))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    app = tk.Tk()
+    app.title("TreasureClaw — 更新")
+    app.resizable(False, False)
+    app.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    frm = ttk.Frame(app, padding=16)
+    frm.pack(fill=tk.BOTH, expand=True)
+    ttk.Label(frm, text=f"正在下載更新… {local_ver} → {remote_ver}").pack(anchor=tk.W)
+    pb = ttk.Progressbar(frm, mode="determinate", length=380, maximum=100)
+    pb.pack(pady=(8, 4))
+    lbl = ttk.Label(frm, text="0%")
+    lbl.pack(anchor=tk.W)
+
+    def poll() -> None:
+        try:
+            while True:
+                m = q.get_nowait()
+                if m[0] == "progress":
+                    v = float(m[1])
+                    pb["value"] = v
+                    lbl.config(text=f"{v:.0f}%")
+                elif m[0] == "done":
+                    app.quit()
+                    return
+        except queue.Empty:
+            pass
+        app.after(40, poll)
+
+    app.after(40, poll)
+    app.mainloop()
+    try:
+        app.destroy()
+    except tk.TclError:
+        pass
+
+    ok = result_ok[0]
+    if ok is True:
+        _show_update_done_dialog(remote_ver)
+        return launch_main_script(root)
+    if ok is False:
+        try:
+            rw = tk.Tk()
+            rw.withdraw()
+            messagebox.showerror(
+                "TreasureClaw",
+                "更新失敗，將啟動目前版本。\n若持續失敗請檢查網路或聯絡開發者。",
+                parent=rw,
+            )
+            rw.destroy()
+        except Exception:
+            pass
+        return launch_main_script(root)
+    return launch_main_script(root)
+
+
 def launcher_main() -> int:
     """供 launcher.py 使用：先更新再啟動 test.py。"""
     root = install_root()
@@ -574,15 +938,7 @@ def _launcher_main_impl(root: Path) -> int:
         return launch_main_script(root)
 
     print(f"[更新] 發現新版本 {remote_ver} (目前 {local_ver})")
-    if not apply_update_test_py(man):
-        print("[啟動] 更新失敗，仍嘗試啟動目前版本")
-        return launch_main_script(root)
-    if not apply_extra_files(man):
-        print("[啟動] 附加檔案更新失敗，仍嘗試啟動目前版本")
-        return launch_main_script(root)
-    apply_update_version_info(man)
-    sync_version_info_from_manifest(man)
-    return launch_main_script(root)
+    return _launcher_update_with_progress_ui(root, man, local_ver, remote_ver)
 
 
 if __name__ == "__main__":
@@ -590,4 +946,3 @@ if __name__ == "__main__":
         sys.exit(launcher_main())
     except KeyboardInterrupt:
         sys.exit(130)
-print('')
