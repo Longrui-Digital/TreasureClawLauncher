@@ -779,8 +779,21 @@ def launch_main_script(root: Path) -> int:
     return subprocess.call([sys.executable, str(main)], cwd=str(root))
 
 
+def _win32_messagebox(text: str, title: str, *, error: bool = False) -> None:
+    """無 tkinter 時（舊版打包未含 Tcl/Tk）仍顯示系統訊息框；僅 Windows。"""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        flags = 0x10 if error else 0x40  # MB_ICONERROR : MB_ICONINFORMATION
+        ctypes.windll.user32.MessageBoxW(0, text, title, flags)
+    except Exception:
+        pass
+
+
 def _show_update_done_dialog(remote_ver: str) -> None:
-    """更新成功後提示，使用者按確定後再啟動主程式。"""
+    """After successful update: show dialog (EN); user clicks OK then main app starts."""
     try:
         import tkinter as tk
         from tkinter import messagebox
@@ -789,12 +802,16 @@ def _show_update_done_dialog(remote_ver: str) -> None:
         r.withdraw()
         messagebox.showinfo(
             "TreasureClaw",
-            f"更新完成。\n版本：{remote_ver}\n\n請按確定啟動主程式。",
+            f"Update complete.\nVersion: {remote_ver}\n\nClick OK to start the main application.",
             parent=r,
         )
         r.destroy()
     except Exception:
-        pass
+        _win32_messagebox(
+            f"Update complete.\nVersion: {remote_ver}\n\nClick OK to start the main application.",
+            "TreasureClaw",
+            error=False,
+        )
 
 
 def _launcher_update_with_progress_ui(
@@ -803,10 +820,10 @@ def _launcher_update_with_progress_ui(
     local_ver: str,
     remote_ver: str,
 ) -> int:
-    """顯示可反映下載量的百分比進度；完成後彈窗，按確定後啟動 test.py。
+    """Show download progress (percent); then dialog; OK starts test.py.
 
-    tkinter 於函式內匯入（非頂層），避免無 GUI 環境 import 即失敗。
-    若無 tkinter 或 Tk 無法建立（如 PyInstaller 未打包、--windowed 無主控台難察覺），改無視窗下載。
+    tkinter is imported inside this function. If tkinter or Tk fails, falls back to
+    headless download (no progress window).
     """
     try:
         import tkinter as tk
@@ -848,13 +865,13 @@ def _launcher_update_with_progress_ui(
 
     threading.Thread(target=worker, daemon=True).start()
 
-    app.title("TreasureClaw — 更新")
+    app.title("TreasureClaw — Update")
     app.resizable(False, False)
     app.protocol("WM_DELETE_WINDOW", lambda: None)
 
     frm = ttk.Frame(app, padding=16)
     frm.pack(fill=tk.BOTH, expand=True)
-    ttk.Label(frm, text=f"正在下載更新… {local_ver} → {remote_ver}").pack(anchor=tk.W)
+    ttk.Label(frm, text=f"Downloading update… {local_ver} → {remote_ver}").pack(anchor=tk.W)
     pb = ttk.Progressbar(frm, mode="determinate", length=380, maximum=100)
     pb.pack(pady=(8, 4))
     lbl = ttk.Label(frm, text="0%")
@@ -892,12 +909,18 @@ def _launcher_update_with_progress_ui(
             rw.withdraw()
             messagebox.showerror(
                 "TreasureClaw",
-                "更新失敗，將啟動目前版本。\n若持續失敗請檢查網路或聯絡開發者。",
+                "Update failed. The app will start with the current version.\n"
+                "If this keeps happening, check your network or contact the developer.",
                 parent=rw,
             )
             rw.destroy()
         except Exception:
-            pass
+            _win32_messagebox(
+                "Update failed. The app will start with the current version.\n"
+                "If this keeps happening, check your network or contact the developer.",
+                "TreasureClaw",
+                error=True,
+            )
         return launch_main_script(root)
     return launch_main_script(root)
 

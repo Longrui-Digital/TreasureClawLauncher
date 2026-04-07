@@ -1,67 +1,67 @@
 {
-  "version": "1.2.1",
-  "download_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/test.py",
+  "version": "1.2.2",
+  "download_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/test.py",
   "sha256": "",
-  "version_info_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/version_info.py",
+  "version_info_url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/version_info.py",
   "version_info_sha256": "",
   "extra_files": [
     {
       "path": "app_update.py",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/app_update.py",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/app_update.py",
       "sha256": ""
     },
     {
       "path": "data/BR.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/BR.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/BR.gif",
       "sha256": ""
     },{
       "path": "data/EN.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/EN.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/EN.gif",
       "sha256": ""
     },  
     {
       "path": "data/ES.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/ES.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/ES.gif",
       "sha256": ""
     },
     {
       "path": "data/HK.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/HK.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/HK.gif",
       "sha256": ""
     },  
     {
       "path": "data/ID.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/ID.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/ID.gif",
       "sha256": ""
     },
     {
       "path": "data/IN.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/IN.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/IN.gif",
       "sha256": ""
     },
     {
       "path": "data/JP.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/JP.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/JP.gif",
       "sha256": ""
     },
     {
       "path": "data/KR.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/KR.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/KR.gif",
       "sha256": ""
     },
     {
       "path": "data/MY.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/MY.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/MY.gif",
       "sha256": ""
     },  
     {
       "path": "data/TH.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/TH.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/TH.gif",
       "sha256": ""
     },
     {
       "path": "data/ZA.gif",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.1/ZA.gif",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.2/ZA.gif",
       "sha256": ""
     }
   ]

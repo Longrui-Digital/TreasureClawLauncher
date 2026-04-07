@@ -1340,6 +1340,8 @@ class LoginApp:
         self._ai_show_ready_until_start = False
         self._main_banner_photo = None
         self._main_scroll_canvas: tk.Canvas | None = None
+        # 首次選國家頁頂部 GIF 強制檔名（僅 onboarding）；登入後清除
+        self._login_banner_gif_override: str | None = None
 
         saved = self.load_config()
         if not saved.get("language_onboarding_done"):
@@ -1725,6 +1727,12 @@ class LoginApp:
 
     def _login_gif_candidates(self) -> tuple[str, ...]:
         """依目前選擇之平台鍵 → 國碼 GIF；再備援 config onboarding_country；最後 LOGIN_MEDIA_FALLBACK_GIF。"""
+        ov = getattr(self, "_login_banner_gif_override", None)
+        if isinstance(ov, str) and ov.strip():
+            name = ov.strip()
+            if name.lower().endswith(".gif"):
+                return (name, LOGIN_MEDIA_FALLBACK_GIF)
+            return (f"{name}.gif", LOGIN_MEDIA_FALLBACK_GIF)
         pk = normalize_platform_key(getattr(self, "_platform_key", DEFAULT_PLATFORM_KEY))
         ordered: list[str] = []
         cc = _tier_bonus_country_for_platform_key(pk)
@@ -2062,6 +2070,7 @@ class LoginApp:
     def show_language_onboarding_frame(self) -> None:
         """首次啟動：選國家／地區（旗幟 + 名稱），綁定介面語言與平台後進入帳密登入。"""
         self.clear_frame()
+        self._login_banner_gif_override = "EN.gif"
         apply_platform_key(DEFAULT_PLATFORM_KEY)
         self.root.title(f"{UI_I18N[UI_LANG_DEFAULT]['app_title']} — v{APP_VERSION}")
         self.root.configure(bg=LOGIN_UI_BG)
@@ -2130,6 +2139,7 @@ class LoginApp:
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
         def commit_country(co: OnboardingCountry) -> None:
+            self._login_banner_gif_override = None
             lang_code = normalize_ui_language(co.ui_language)
             pk = normalize_platform_key(co.platform_key)
             apply_platform_key(pk)
