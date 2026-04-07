@@ -4392,6 +4392,7 @@ class LoginApp:
             driver.get(games_url)
             WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             time.sleep(0.4)
+            self._try_dismiss_site_ad_popup(driver)
         except Exception as e:
             print(f"[領獎] 錯誤: {type(e).__name__}: {e}")
 
@@ -4466,6 +4467,7 @@ class LoginApp:
                 guest_url = self._guest_site_url()
                 print(f"正在前往: {guest_url}")
                 driver.get(guest_url)
+                self._try_dismiss_site_ad_popup(driver)
                 if not self._login_site(driver, wait, acc, pwd):
                     self._handle_login_failure()
                     return False
@@ -4522,7 +4524,7 @@ class LoginApp:
         threading.Thread(target=run, daemon=True).start()
 
     def _try_dismiss_site_ad_popup(self, driver: webdriver.Chrome) -> None:
-        """登入站台後、進入遊戲圖示前：若有全頁廣告，點 div.bgclosePopup 關閉（可連關多層）。"""
+        """前往 guest_url、/site/games 或登入後進入遊戲前：若有全頁廣告，點 div.bgclosePopup 關閉（可連關多層）。"""
         t0 = time.time()
         deadline = t0 + 12.0
         time.sleep(0.35)
@@ -4645,6 +4647,7 @@ class LoginApp:
                     guest_url = self._guest_site_url()
                     print(f"正在前往: {guest_url}")
                     driver.get(guest_url)
+                    self._try_dismiss_site_ad_popup(driver)
                     if not self._login_site(driver, wait, acc, pwd):
                         self._schedule_login_failure_ui()
                         try:
