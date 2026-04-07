@@ -803,13 +803,17 @@ def _launcher_update_with_progress_ui(
     local_ver: str,
     remote_ver: str,
 ) -> int:
-    """顯示可反映下載量的百分比進度；完成後彈窗，按確定後啟動 test.py。"""
+    """顯示可反映下載量的百分比進度；完成後彈窗，按確定後啟動 test.py。
+
+    tkinter 於函式內匯入（非頂層），避免無 GUI 環境 import 即失敗。
+    若無 tkinter 或 Tk 無法建立（如 PyInstaller 未打包、--windowed 無主控台難察覺），改無視窗下載。
+    """
     try:
         import tkinter as tk
-        from tkinter import ttk
         from tkinter import messagebox
-    except ImportError:
-        print("[更新] 無法顯示進度（缺少 tkinter），改為無視窗下載")
+        from tkinter import ttk
+    except ImportError as e:
+        print(f"[更新] 無法顯示進度（tkinter 不可用: {e}），改為無視窗下載", file=sys.stderr)
         if not _launcher_apply_manifest_with_progress(man, lambda _p: None):
             print("[啟動] 更新失敗，仍嘗試啟動目前版本")
             return launch_main_script(root)
@@ -832,9 +836,18 @@ def _launcher_update_with_progress_ui(
             result_ok[0] = False
             q.put(("done", False))
 
+    try:
+        app = tk.Tk()
+    except Exception as e:
+        print(f"[更新] 無法建立 Tk 視窗（{type(e).__name__}: {e}），改為無視窗下載", file=sys.stderr)
+        if not _launcher_apply_manifest_with_progress(man, lambda _p: None):
+            print("[啟動] 更新失敗，仍嘗試啟動目前版本")
+            return launch_main_script(root)
+        _show_update_done_dialog(remote_ver)
+        return launch_main_script(root)
+
     threading.Thread(target=worker, daemon=True).start()
 
-    app = tk.Tk()
     app.title("TreasureClaw — 更新")
     app.resizable(False, False)
     app.protocol("WM_DELETE_WINDOW", lambda: None)
