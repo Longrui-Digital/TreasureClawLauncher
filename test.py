@@ -339,6 +339,50 @@ def app_base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def chromedriver_service() -> Service:
+    """建立 Chrome Service。
+
+    webdriver-manager 預設快取在 %USERPROFILE%\\.wdm，解壓後若將 chromedriver 從子資料夾
+    移至上層，在部分環境會 PermissionError (WinError 5)。改將快取設在 exe 同層（見
+    DriverCacheManager root_dir），失敗則重試；仍失敗時改由 Selenium 4.6+ 內建
+    selenium-manager 自行解析／下載（Service() 不帶路徑）。
+    """
+    cache_root = app_base_dir()
+    wdm_local_saved = os.environ.pop("WDM_LOCAL", None)
+    try:
+        try:
+            from webdriver_manager.core.driver_cache import DriverCacheManager
+
+            cm = DriverCacheManager(root_dir=str(cache_root))
+        except ImportError:
+            cm = None
+
+        if cm is not None:
+            last_pe: PermissionError | None = None
+            for attempt in range(4):
+                try:
+                    path = ChromeDriverManager(cache_manager=cm).install()
+                    return Service(path)
+                except PermissionError as e:
+                    last_pe = e
+                    time.sleep(0.35 * (attempt + 1))
+            try:
+                return Service()
+            except Exception:
+                if last_pe is not None:
+                    raise last_pe
+                raise
+
+        try:
+            path = ChromeDriverManager().install()
+            return Service(path)
+        except PermissionError:
+            return Service()
+    finally:
+        if wdm_local_saved is not None:
+            os.environ["WDM_LOCAL"] = wdm_local_saved
+
+
 def bundled_resources_dir() -> Path:
     """PyInstaller `--add-data` 打包的檔案執行時位於此目錄（`sys._MEIPASS`）；開發時等同程式目錄。"""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -1132,7 +1176,7 @@ def run_fb_account_registration(country: str, savename: str) -> None:
     chrome_options_hide_automation_infobar(opts)
     chrome_options_suppress_prompts(opts)
 
-    service = Service(ChromeDriverManager().install())
+    service = chromedriver_service()
     driver = webdriver.Chrome(service=service, options=opts)
     chrome_driver_patch_automation_detection(driver)
     wait = WebDriverWait(driver, FB_CREATION_WAIT_TIMEOUT)
@@ -3637,7 +3681,7 @@ class LoginApp:
         chrome_options_hide_automation_infobar(options)
         chrome_options_suppress_prompts(options)
 
-        service = Service(ChromeDriverManager().install())
+        service = chromedriver_service()
         driver = webdriver.Chrome(service=service, options=options)
         chrome_driver_patch_automation_detection(driver)
         wait = WebDriverWait(driver, 15)
@@ -3989,7 +4033,7 @@ class LoginApp:
                     opts.add_argument("--disable-blink-features=AutomationControlled")
                     chrome_options_hide_automation_infobar(opts)
                     chrome_options_suppress_prompts(opts)
-                    svc = Service(ChromeDriverManager().install())
+                    svc = chromedriver_service()
                     d = webdriver.Chrome(service=svc, options=opts)
                     chrome_driver_patch_automation_detection(d)
                     self._fb_driver = d

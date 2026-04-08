@@ -46,6 +46,28 @@ DEFAULT_MANIFEST_URL = ""
 # （本機測試：於含 releases/manifest.json 的目錄執行 python -m http.server 8000）
 DEFAULT_LOCAL_RELEASES_MANIFEST_URL = "http://127.0.0.1:8000/releases/manifest.json"
 
+# Launcher / update UI: English only (explicit strings + custom Tk dialog so the button is "OK", not localized "確定").
+UI_APP_NAME = "TreasureClaw"
+UI_LAUNCHER_NAME = "TreasureClawLauncher"
+UI_UPDATE_WINDOW_TITLE = "TreasureClaw — Update"
+
+
+def ui_downloading_label(local_ver: str, remote_ver: str) -> str:
+    return f"Downloading update... {local_ver} → {remote_ver}"
+
+
+def ui_update_complete_body(remote_ver: str) -> str:
+    return (
+        f"Update complete.\nVersion: {remote_ver}\n\n"
+        "Click OK to start the main application."
+    )
+
+
+UI_UPDATE_FAILED_BODY = (
+    "Update failed. The app will start with the current version.\n"
+    "If this keeps happening, check your network or contact the developer."
+)
+
 
 def install_root() -> Path:
     """與 exe／腳本同層：config.json、update_config.json、launcher_crash.log 等。"""
@@ -121,7 +143,7 @@ def _fatal_error(root: Path, title: str, exc: BaseException) -> None:
         try:
             import ctypes
 
-            body = f"啟動失敗：{exc}\n\n詳情已寫入：\n{log}"
+            body = f"Startup failed:\n{exc}\n\nDetails were written to:\n{log}"
             if len(body) > 900:
                 body = body[:897] + "..."
             ctypes.windll.user32.MessageBoxW(0, body, title, 0x10)
@@ -142,7 +164,7 @@ def _fatal_msg(root: Path, title: str, message: str) -> None:
         try:
             import ctypes
 
-            body = f"{message}\n\n（{log}）"
+            body = f"{message}\n\n(Log file: {log})"
             if len(body) > 900:
                 body = body[:897] + "..."
             ctypes.windll.user32.MessageBoxW(0, body, title, 0x10)
@@ -707,27 +729,27 @@ def check_and_apply_update(manifest_url: str) -> tuple[str, str]:
       status: 'updated' | 'latest' | 'error'
     """
     if requests is None:
-        return ("error", "缺少 requests 套件")
+        return ("error", "The requests package is not installed.")
     if not manifest_url.strip():
-        return ("error", "未設定更新清單網址")
+        return ("error", "Update manifest URL is not configured.")
 
     local_ver = read_local_version()
     man = fetch_manifest(manifest_url)
     if not man:
-        return ("error", "無法取得更新清單")
+        return ("error", "Could not fetch the update manifest.")
 
     remote_ver = str(man.get("version") or "").strip()
     if not remote_ver:
-        return ("error", "清單缺少 version")
+        return ("error", "Manifest is missing the version field.")
 
     if not version_less(local_ver, remote_ver):
         # 僅當「遠端 version 大於本地」才會更新；兩者相同也會回傳 latest
-        return ("latest", f"{local_ver} (遠端 {remote_ver})")
+        return ("latest", f"{local_ver} (remote {remote_ver})")
 
     if not apply_update_test_py(man):
-        return ("error", "下載或覆寫 test.py 失敗")
+        return ("error", "Failed to download or apply test.py.")
     if not apply_extra_files(man):
-        return ("error", "下載或覆寫附加檔案失敗")
+        return ("error", "Failed to download or apply extra files.")
     apply_update_version_info(man)
     sync_version_info_from_manifest(man)
     return ("updated", remote_ver)
@@ -742,8 +764,8 @@ def launch_main_script(root: Path) -> int:
             extra = f" 或 {Path(getattr(sys, '_MEIPASS')) / MAIN_SCRIPT}"
         _fatal_msg(
             root,
-            "TreasureClawLauncher",
-            f"找不到主程式：{app_bundle_root() / MAIN_SCRIPT}{extra}",
+            UI_LAUNCHER_NAME,
+            f"Main script not found: {app_bundle_root() / MAIN_SCRIPT}{extra}",
         )
         return 1
     if getattr(sys, "frozen", False):
@@ -770,7 +792,7 @@ def launch_main_script(root: Path) -> int:
                 return code
             return 1
         except Exception as e:
-            _fatal_error(root, "TreasureClawLauncher", e)
+            _fatal_error(root, UI_LAUNCHER_NAME, e)
             return 1
         finally:
             sys.argv = old_argv
@@ -794,26 +816,57 @@ def _win32_messagebox(text: str, title: str, *, error: bool = False) -> None:
         pass
 
 
-def _show_update_done_dialog(remote_ver: str) -> None:
-    """After successful update: show dialog (EN); user clicks OK then main app starts."""
+def _tk_dialog_ok_en(title: str, message: str, *, error: bool = False) -> None:
+    """Modal dialog with English 'OK' (standard messagebox uses OS locale for the button)."""
+    root = None
     try:
         import tkinter as tk
-        from tkinter import messagebox
+        from tkinter import ttk
 
-        r = tk.Tk()
-        r.withdraw()
-        messagebox.showinfo(
-            "TreasureClaw",
-            f"Update complete.\nVersion: {remote_ver}\n\nClick OK to start the main application.",
-            parent=r,
-        )
-        r.destroy()
+        root = tk.Tk()
+        root.withdraw()
+        dlg = tk.Toplevel(root)
+        dlg.title(title)
+        dlg.resizable(False, False)
+        dlg.attributes("-topmost", True)
+        frm = ttk.Frame(dlg, padding=20)
+        frm.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(frm, text=message, justify=tk.LEFT, wraplength=440).pack(anchor=tk.W)
+
+        def close() -> None:
+            try:
+                dlg.destroy()
+            except tk.TclError:
+                pass
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+
+        ttk.Button(frm, text="OK", command=close).pack(pady=(16, 0), anchor=tk.E)
+        dlg.protocol("WM_DELETE_WINDOW", close)
+        dlg.bind("<Return>", lambda _e: close())
+        dlg.bind("<Escape>", lambda _e: close())
+        dlg.transient(root)
+        dlg.grab_set()
+        dlg.update_idletasks()
+        try:
+            dlg.focus_force()
+        except tk.TclError:
+            pass
+        root.wait_window(dlg)
     except Exception:
-        _win32_messagebox(
-            f"Update complete.\nVersion: {remote_ver}\n\nClick OK to start the main application.",
-            "TreasureClaw",
-            error=False,
-        )
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+        _win32_messagebox(message, title, error=error)
+
+
+def _show_update_done_dialog(remote_ver: str) -> None:
+    """After successful update: English dialog; user clicks OK then main app starts."""
+    _tk_dialog_ok_en(UI_APP_NAME, ui_update_complete_body(remote_ver), error=False)
 
 
 def _launcher_update_with_progress_ui(
@@ -829,7 +882,6 @@ def _launcher_update_with_progress_ui(
     """
     try:
         import tkinter as tk
-        from tkinter import messagebox
         from tkinter import ttk
     except ImportError as e:
         print(f"[更新] 無法顯示進度（tkinter 不可用: {e}），改為無視窗下載", file=sys.stderr)
@@ -869,13 +921,13 @@ def _launcher_update_with_progress_ui(
 
     threading.Thread(target=worker, daemon=True).start()
 
-    app.title("TreasureClaw — Update")
+    app.title(UI_UPDATE_WINDOW_TITLE)
     app.resizable(False, False)
     app.protocol("WM_DELETE_WINDOW", lambda: None)
 
     frm = ttk.Frame(app, padding=16)
     frm.pack(fill=tk.BOTH, expand=True)
-    ttk.Label(frm, text=f"Downloading update… {local_ver} → {remote_ver}").pack(anchor=tk.W)
+    ttk.Label(frm, text=ui_downloading_label(local_ver, remote_ver)).pack(anchor=tk.W)
     pb = ttk.Progressbar(frm, mode="determinate", length=380, maximum=100)
     pb.pack(pady=(8, 4))
     lbl = ttk.Label(frm, text="0%")
@@ -908,23 +960,7 @@ def _launcher_update_with_progress_ui(
         _show_update_done_dialog(remote_ver)
         return launch_main_script(root)
     if ok is False:
-        try:
-            rw = tk.Tk()
-            rw.withdraw()
-            messagebox.showerror(
-                "TreasureClaw",
-                "Update failed. The app will start with the current version.\n"
-                "If this keeps happening, check your network or contact the developer.",
-                parent=rw,
-            )
-            rw.destroy()
-        except Exception:
-            _win32_messagebox(
-                "Update failed. The app will start with the current version.\n"
-                "If this keeps happening, check your network or contact the developer.",
-                "TreasureClaw",
-                error=True,
-            )
+        _tk_dialog_ok_en(UI_APP_NAME, UI_UPDATE_FAILED_BODY, error=True)
         return launch_main_script(root)
     return launch_main_script(root)
 
@@ -935,15 +971,15 @@ def launcher_main() -> int:
     if requests is None:
         _fatal_msg(
             root,
-            "TreasureClawLauncher",
-            "建置缺少 requests 模組（pip install requests），請向開發者回報。",
+            UI_LAUNCHER_NAME,
+            "This build is missing the requests module. Install with: pip install requests",
         )
         return 1
 
     try:
         return _launcher_main_impl(root)
     except Exception as e:
-        _fatal_error(root, "TreasureClawLauncher", e)
+        _fatal_error(root, UI_LAUNCHER_NAME, e)
         return 1
 
 

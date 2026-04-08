@@ -40,6 +40,8 @@ coverage.xml
 Thumbs.db
 
 # --- 本機執行期／敏感資料（勿提交；安裝檔內由使用者產生）---
+# webdriver-manager 快取（ChromeDriver；exe／專案同層 .wdm）
+.wdm/
 config.json
 launcher_crash.log
 lottery_record.json
