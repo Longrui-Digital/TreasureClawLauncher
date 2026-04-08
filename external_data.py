@@ -6,23 +6,54 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# 與 config.json 同層；except 內錯誤改寫入此檔而非僅 print
+# 日誌目錄名（置於 %LOCALAPPDATA% 下，避免 exe 目錄不可寫時無法紀錄）
+LOG_APP_DIR_NAME = "TreasureClaw"
 EXCEPTION_LOG_FILENAME = "app_exceptions.txt"
 
 
-def append_exception_log_line(text: str) -> None:
-    """將一行訊息附加寫入 exe／腳本同層的 app_exceptions.txt（UTF-8）。寫入失敗時靜默略過。"""
+def user_log_dir() -> Path:
+    """可寫日誌目錄：Windows 為 %LOCALAPPDATA%\\TreasureClaw；無法建立時回退 exe／腳本同層。"""
+    if sys.platform == "win32":
+        la = (os.environ.get("LOCALAPPDATA") or "").strip()
+        if la:
+            p = Path(la) / LOG_APP_DIR_NAME
+            try:
+                p.mkdir(parents=True, exist_ok=True)
+                return p
+            except OSError:
+                pass
+    else:
+        p = Path.home() / f".{LOG_APP_DIR_NAME}"
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except OSError:
+            pass
+    return _app_base_dir()
+
+
+def append_exception_log_line(text: str, exc: BaseException | None = None) -> None:
+    """將說明與時間戳寫入日誌並 print；若傳入 exc 再另起一行 print(exc) 與寫入（等同原本 except 底下 print(e)）。"""
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}"
     try:
-        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n"
-        p = _app_base_dir() / EXCEPTION_LOG_FILENAME
+        print(line)
+        if exc is not None:
+            print(exc)
+    except Exception:
+        pass
+    try:
+        p = user_log_dir() / EXCEPTION_LOG_FILENAME
         with open(p, "a", encoding="utf-8") as f:
-            f.write(line)
+            f.write(line + "\n")
+            if exc is not None:
+                f.write(f"{exc}\n")
     except Exception:
         pass
 

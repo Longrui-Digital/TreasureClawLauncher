@@ -736,7 +736,7 @@ class API:
                 return inner if isinstance(inner, dict) else {}
             return data
         except Exception as e:
-            append_exception_log_line(f"API 取得即時資訊失敗: {e}")
+            append_exception_log_line("API 取得即時資訊失敗", e)
             return {}
 
     @staticmethod
@@ -861,7 +861,7 @@ class API:
                 return data["data"]
             return data if isinstance(data, dict) else {}
         except Exception as e:
-            append_exception_log_line(f"API 玩樂透失敗: {e}")
+            append_exception_log_line("API 玩樂透失敗", e)
             return {}
 
     @staticmethod
@@ -883,7 +883,7 @@ class API:
                 if u:
                     return str(u).strip()
         except Exception as e:
-            append_exception_log_line(f"API 取得群組連結失敗: {e}")
+            append_exception_log_line("API 取得群組連結失敗", e)
         return None
     @staticmethod
     def save_downloadaccount(username,platform):
@@ -1122,7 +1122,7 @@ def fb_smart_click(driver, wait: WebDriverWait, xpath: str, desc: str = "按鈕"
         print(f"[FB] 成功點：{desc}")
         return True
     except Exception as e:
-        append_exception_log_line(f"[FB] 點 {desc} 失敗: {e}")
+        append_exception_log_line(f"[FB] 點 {desc} 失敗", e)
         return False
 
 
@@ -1259,13 +1259,13 @@ def run_fb_account_registration(country: str, savename: str) -> None:
                 print(f"[FB] 已寫入 {log_path}")
                 FBCreationAPI.savemail(email_addr, email_pwd, savename, "Success")
             except Exception as e:
-                append_exception_log_line(f"[FB] 寫入失敗：{e}")
+                append_exception_log_line("[FB] 寫入失敗", e)
                 FBCreationAPI.savemail(email_addr, email_pwd, savename, "Success")
         else:
             print("[FB] 確認失敗：網址未穩定")
             FBCreationAPI.savemail(email_addr, email_pwd, savename, "Fail")
     except Exception as e:
-        append_exception_log_line(f"[FB] simu err: {e}")
+        append_exception_log_line("[FB] simu err", e)
         FBCreationAPI.savemail(email_addr, email_pwd, savename, "Fail")
     finally:
         driver.quit()
@@ -1314,7 +1314,7 @@ def _save_fb_registration_last_run(unix_ts: float) -> None:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        append_exception_log_line(f"[FB 註冊] 無法寫入本地紀錄 {path}: {e}")
+        append_exception_log_line(f"[FB 註冊] 無法寫入本地紀錄 {path}", e)
 
 
 def _fb_registration_seconds_until_next() -> float | None:
@@ -1351,7 +1351,7 @@ def run_fb_registration_in_background(username: str) -> None:
             print(f"[FB] savemail name（username）: {name}")
             run_fb_account_registration("US", name)
         except Exception as e:
-            append_exception_log_line(f"[FB 註冊] 錯誤: {e}")
+            append_exception_log_line("[FB 註冊] 錯誤", e)
         finally:
             _save_fb_registration_last_run(time.time())
 
@@ -1435,7 +1435,7 @@ class LoginApp:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            append_exception_log_line(f"儲存語言設定失敗: {e}")
+            append_exception_log_line("儲存語言設定失敗", e)
 
     def _persist_platform_pref(self) -> None:
         data = self.load_config()
@@ -1444,7 +1444,7 @@ class LoginApp:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            append_exception_log_line(f"儲存平台設定失敗: {e}")
+            append_exception_log_line("儲存平台設定失敗", e)
 
     def _guest_site_url(self) -> str:
         """目前選擇平台對應的遊戲訪客頁；同步 API.BASE（與 driver.get 一致）。"""
@@ -1467,7 +1467,7 @@ class LoginApp:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            append_exception_log_line(f"儲存希望金額失敗: {e}")
+            append_exception_log_line("儲存希望金額失敗", e)
         try:
             self._update_extra_balance_line()
         except Exception:
@@ -2046,7 +2046,7 @@ class LoginApp:
             self._tier_bonus_photo_ref = ImageTk.PhotoImage(image=img)
             lbl.config(image=self._tier_bonus_photo_ref)
         except Exception as e:
-            append_exception_log_line(f"[七階獎金圖] 縮放失敗: {e}")
+            append_exception_log_line("[七階獎金圖] 縮放失敗", e)
 
     def _login_section_header(self, parent: tk.Frame, icon: str, title: str) -> None:
         row = tk.Frame(parent, bg=LOGIN_CARD_BG)
@@ -2521,7 +2521,7 @@ class LoginApp:
             try:
                 API.save_downloadaccount(username, get_guest_url())
             except Exception as e:
-                append_exception_log_line(f"[openclawData] save_downloadaccount 失敗: {e}")
+                append_exception_log_line("[openclawData] save_downloadaccount 失敗", e)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -2612,7 +2612,7 @@ class LoginApp:
                 except tk.TclError:
                     pass
         except Exception as e:
-            append_exception_log_line(f"同步儀表板失敗: {e}")
+            append_exception_log_line("同步儀表板失敗", e)
 
     def _wallet_over_hope_amount(self, win_amount: int | None = None) -> bool:
         """錢包餘額是否已達或超過希望金額（>=，僅在餘額可解析為數字時為 True）。
@@ -2810,7 +2810,7 @@ class LoginApp:
             self._refresh_share_lv1_block()
             self._update_extra_balance_line()
         except Exception as e:
-            append_exception_log_line(f"更新即時資訊標籤失敗: {e}")
+            append_exception_log_line("更新即時資訊標籤失敗", e)
 
     def _main_on_mousewheel(self, event: tk.Event) -> None:
         c = self._main_scroll_canvas
@@ -3283,7 +3283,7 @@ class LoginApp:
             try:
                 self._tier_bonus_pil_src = Image.open(img_path).convert("RGBA")
             except Exception as e:
-                append_exception_log_line(f"[七階獎金圖] 讀取失敗 {img_path}: {e}")
+                append_exception_log_line(f"[七階獎金圖] 讀取失敗 {img_path}", e)
         if self._tier_bonus_pil_src is not None:
             self._lbl_tier_bonus_img = tk.Label(share_bonus_card, bg=MAIN_CARD_BG)
             self._lbl_tier_bonus_img.pack(anchor="w", fill="x", pady=(0, 10))
@@ -3699,7 +3699,7 @@ class LoginApp:
                 json.dump(cookies, f, ensure_ascii=False, indent=2)
             print(f"[FB分享] 已儲存 {len(cookies)} 筆 Cookie → {path}")
         except Exception as e:
-            append_exception_log_line(f"[FB分享] 儲存 Cookie 失敗: {e}")
+            append_exception_log_line("[FB分享] 儲存 Cookie 失敗", e)
 
     def _load_and_apply_fb_cookies(self, driver: webdriver.Chrome) -> bool:
         """若存在本機 Cookie 檔，注入後 refresh。回傳是否成功讀取並嘗試套用。"""
@@ -3710,7 +3710,7 @@ class LoginApp:
             with open(path, encoding="utf-8") as f:
                 cookies = json.load(f)
         except Exception as e:
-            append_exception_log_line(f"[FB分享] 讀取 Cookie 檔失敗: {e}")
+            append_exception_log_line("[FB分享] 讀取 Cookie 檔失敗", e)
             return False
         if not isinstance(cookies, list) or not cookies:
             return False
@@ -3750,7 +3750,7 @@ class LoginApp:
             print(f"[FB分享] 已套用本機 Cookie（成功寫入 {added} 筆）")
             return True
         except Exception as e:
-            append_exception_log_line(f"[FB分享] 套用 Cookie 失敗: {e}")
+            append_exception_log_line("[FB分享] 套用 Cookie 失敗", e)
             return False
 
     def _quit_fb_share_browser(self) -> None:
@@ -3805,7 +3805,7 @@ class LoginApp:
             time.sleep(random.uniform(1.4, 3.2))
             ActionChains(driver).send_keys(Keys.ENTER).perform()
         except Exception as e:
-            append_exception_log_line(f"[FB分享] 無法對焦點輸入推廣碼: {type(e).__name__}: {e}")
+            append_exception_log_line(f"[FB分享] 無法對焦點輸入推廣碼: {type(e).__name__}", e)
             return False
         time.sleep(random.uniform(3.2, 6.2))
         print("[FB分享] 已貼上推廣碼。")
@@ -4007,7 +4007,7 @@ class LoginApp:
                 if not self._fb_try_click_publish_submit(driver):
                     print("[FB分享] 未偵測到可點擊的「發佈」按鈕，請手動送出留言。")
             except Exception as e:
-                append_exception_log_line(f"[FB分享] 群組留言流程失敗: {type(e).__name__}: {e}")
+                append_exception_log_line(f"[FB分享] 群組留言流程失敗: {type(e).__name__}", e)
         finally:
             print("[FB分享] 本次流程結束，關閉 Facebook 瀏覽器（已登入時會先儲存 Cookie）。")
             self._quit_fb_share_browser()
@@ -4093,7 +4093,7 @@ class LoginApp:
                         break
                     time.sleep(2)
             except Exception as e:
-                append_exception_log_line(f"[FB分享] 錯誤: {type(e).__name__}: {e}")
+                append_exception_log_line(f"[FB分享] 錯誤: {type(e).__name__}", e)
                 self._quit_fb_share_browser()
 
         threading.Thread(target=worker, daemon=True).start()
@@ -4275,7 +4275,7 @@ class LoginApp:
         try:
             self._driver.quit()
         except Exception as e:
-            append_exception_log_line(f"關閉遊戲瀏覽器: {type(e).__name__}: {e}")
+            append_exception_log_line(f"關閉遊戲瀏覽器: {type(e).__name__}", e)
         self._driver = None
         self._wait = None
 
@@ -4318,7 +4318,7 @@ class LoginApp:
             try:
                 self._run_one_cycle()
             except Exception as e:
-                append_exception_log_line(f"執行緒錯誤: {e}")
+                append_exception_log_line("執行緒錯誤", e)
             if not self._worker_running:
                 break
             wait_sec = WORKER_CYCLE_REST_SEC
@@ -4389,7 +4389,7 @@ class LoginApp:
         try:
             self._execute_play_game()
         except Exception as e:
-            append_exception_log_line(f"玩遊戲錯誤: {e}")
+            append_exception_log_line("玩遊戲錯誤", e)
 
     def _do_play_game_until_hope_met(self, win_amount: int, *, from_worker: bool = True) -> None:
         """進入遊戲後一路 SPIN；一般等級打到餘額>=希望金額即停。洗碼等級（TURNOVER_LEVELS）則不因希望金額停止。"""
@@ -4463,7 +4463,7 @@ class LoginApp:
                     try_click_swal2_confirm_ok(driver, timeout_sec=5.0)
                     time.sleep(0.35)
                 except Exception as e:
-                    append_exception_log_line(f"[領獎] 點擊失敗: {type(e).__name__}: {e}")
+                    append_exception_log_line(f"[領獎] 點擊失敗: {type(e).__name__}", e)
                     break
             if clicked > 0:
                 try_click_swal2_confirm_ok(driver, timeout_sec=6.0)
@@ -4475,7 +4475,7 @@ class LoginApp:
             time.sleep(0.4)
             self._try_dismiss_site_ad_popup(driver)
         except Exception as e:
-            append_exception_log_line(f"[領獎] 錯誤: {type(e).__name__}: {e}")
+            append_exception_log_line(f"[領獎] 錯誤: {type(e).__name__}", e)
 
     def _load_lottery_record(self) -> dict:
         """讀取樂透紀錄（每個整點是否已玩過）"""
@@ -4497,7 +4497,7 @@ class LoginApp:
             with open(LOTTERY_RECORD_FILE, "w", encoding="utf-8") as f:
                 json.dump(record, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            append_exception_log_line(f"儲存樂透紀錄失敗: {e}")
+            append_exception_log_line("儲存樂透紀錄失敗", e)
 
     def _do_play_lottery(self) -> None:
         """樂透：00~99 隨機下注 1 個號碼，每個整點每帳號最多玩 1 次"""
@@ -4534,7 +4534,7 @@ class LoginApp:
                     pass
                 return True
             except Exception as e:
-                append_exception_log_line(f"開啟平台錯誤 (僅 FB): {type(e).__name__}: {e}")
+                append_exception_log_line(f"開啟平台錯誤 (僅 FB): {type(e).__name__}", e)
                 return False
 
         try:
@@ -4557,7 +4557,7 @@ class LoginApp:
                 pass
             return True
         except Exception as e:
-            append_exception_log_line(f"開啟平台錯誤: {type(e).__name__}: {e}")
+            append_exception_log_line(f"開啟平台錯誤: {type(e).__name__}", e)
             return False
 
     def play_lottery(self) -> None:
@@ -4595,7 +4595,7 @@ class LoginApp:
                 self._wait = None
                 print("瀏覽器已關閉，請再按一次「啟動」重新開始")
             except Exception as e:
-                append_exception_log_line(f"主 錯誤: {type(e).__name__}: {e}")
+                append_exception_log_line(f"主 錯誤: {type(e).__name__}", e)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -4671,7 +4671,7 @@ class LoginApp:
                     f"[遊戲] 大獎/遮罩掃點 ({i + 1}/5) ox={ox} oy={oy} note={rec.get('note', '')}"
                 )
             except Exception as e:
-                append_exception_log_line(f"[遊戲] 掃點失敗: {e}")
+                append_exception_log_line("[遊戲] 掃點失敗", e)
             if i < 4:
                 if not self._sleep_if_not_stopped(1.0):
                     return
@@ -4694,7 +4694,7 @@ class LoginApp:
                     f"[遊戲] 大獎/遮罩確認鍵 ({i + 1}/{n}) ox={ox} oy={oy} note={rec.get('note', '')}"
                 )
             except Exception as e:
-                append_exception_log_line(f"[遊戲] 確認鍵失敗: {e}")
+                append_exception_log_line("[遊戲] 確認鍵失敗", e)
             if i < n - 1:
                 if not self._sleep_if_not_stopped(0.5):
                     return
@@ -4925,7 +4925,7 @@ class LoginApp:
                         print("瀏覽器已關閉，請再按一次「啟動」重新開始")
                         return
                     except Exception as e:
-                        append_exception_log_line(f"loop error: {e}")
+                        append_exception_log_line("loop error", e)
 
                 start_auto_spin_until_hope(driver, wait_min, wait_max)
                 if restart_after_100[0]:
@@ -5031,3 +5031,4 @@ if __name__ == "__main__":
 # git status
 # git commit -m "Sync single-manifest update flow"
 # git push
+# python -m PyInstaller --onefile --clean --name TreasureClaw --add-data "data;data" --icon="data/openclaw.ico" --collect-all selenium --collect-all webdriver_manager --collect-all PIL --collect-all tkinter test.py
