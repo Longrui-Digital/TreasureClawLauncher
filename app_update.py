@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from external_data import append_exception_log_line
+
 try:
     import requests
 except ImportError:
@@ -219,7 +221,7 @@ def fetch_manifest(url: str) -> dict[str, Any] | None:
         data = r.json()
         return data if isinstance(data, dict) else None
     except Exception as e:
-        print(f"[更新] 無法取得更新清單: {e}", file=sys.stderr)
+        append_exception_log_line(f"[更新] 無法取得更新清單: {e}")
         return None
 
 
@@ -270,7 +272,7 @@ def _download_to_path_stream(
                             on_chunk(len(chunk), total)
         return True
     except Exception as e:
-        print(f"[更新] 下載失敗: {e}", file=sys.stderr)
+        append_exception_log_line(f"[更新] 下載失敗: {e}")
         return False
 
 
@@ -849,14 +851,16 @@ def _launcher_update_with_progress_ui(
             result_ok[0] = ok
             q.put(("done", ok))
         except Exception as e:
-            print(f"[更新] 套用失敗: {e}", file=sys.stderr)
+            append_exception_log_line(f"[更新] 套用失敗: {e}")
             result_ok[0] = False
             q.put(("done", False))
 
     try:
         app = tk.Tk()
     except Exception as e:
-        print(f"[更新] 無法建立 Tk 視窗（{type(e).__name__}: {e}），改為無視窗下載", file=sys.stderr)
+        append_exception_log_line(
+            f"[更新] 無法建立 Tk 視窗（{type(e).__name__}: {e}），改為無視窗下載"
+        )
         if not _launcher_apply_manifest_with_progress(man, lambda _p: None):
             print("[啟動] 更新失敗，仍嘗試啟動目前版本")
             return launch_main_script(root)

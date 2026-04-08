@@ -7,9 +7,24 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# 與 config.json 同層；except 內錯誤改寫入此檔而非僅 print
+EXCEPTION_LOG_FILENAME = "app_exceptions.txt"
+
+
+def append_exception_log_line(text: str) -> None:
+    """將一行訊息附加寫入 exe／腳本同層的 app_exceptions.txt（UTF-8）。寫入失敗時靜默略過。"""
+    try:
+        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n"
+        p = _app_base_dir() / EXCEPTION_LOG_FILENAME
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def _app_base_dir() -> Path:
