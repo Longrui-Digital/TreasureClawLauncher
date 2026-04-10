@@ -8,6 +8,8 @@ import re
 import sys
 import time
 from urllib.parse import urlparse
+import urllib.error
+import urllib.request
 import tkinter as tk
 import random
 import threading
@@ -314,6 +316,7 @@ def try_click_swal2_confirm_ok(driver: webdriver.Chrome, timeout_sec: float = 6.
 
 
 FB_HOME_URL = "https://www.facebook.com/"
+FB_GROUPS_JOINS_URL = "https://www.facebook.com/groups/joins/?nav_source=tab"
 # API GetFBSocieLink 使用的國別（與 get_group_link 一致）
 FB_GROUP_LINK_COUNTRY = "VN"
 # 精準局數：開局前抓 betCount；每局 SPIN 後輪詢 API 直到 betCount 增加
@@ -381,6 +384,254 @@ def chromedriver_service() -> Service:
     finally:
         if wdm_local_saved is not None:
             os.environ["WDM_LOCAL"] = wdm_local_saved
+
+
+# --- 無介面：NewAdfbnewac API + Headless 登入 Facebook 至首頁（發文待擴充）---
+NEW_AD_FB_NEWAC_URL = "https://www.gamer16888.com/Api/NewAdfbnewac"
+NEW_AD_FB_ID_MIN = 26
+NEW_AD_FB_ID_MAX = 58
+NEW_AD_FB_STATUS_RETRY_MAX = 12
+# 對外 IP 為此值時，不執行 FB 註冊與無介面登入／社團（含啟動時背景執行與 --fb-headless-ad）
+SKIP_FB_AUTOMATION_PUBLIC_IP = "211.22.166.13"
+_fb_public_ip_gate_cache: tuple[float, bool] | None = None  # (monotonic, skip)
+
+
+def _fetch_public_ip_for_gate(timeout: float = 10.0) -> str:
+    urls = (
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+    )
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "TreasureClaw/1"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                text = r.read().decode().strip()
+                if text:
+                    return text
+        except (OSError, urllib.error.URLError, ValueError):
+            continue
+    raise OSError("無法取得對外 IP")
+
+
+def _fb_public_ip_blocks_automation() -> bool:
+    """若目前對外 IP 為 SKIP_FB_AUTOMATION_PUBLIC_IP 則為 True（略過 FB 註冊與無介面流程）。查詢失敗時為 False，不阻擋。"""
+    global _fb_public_ip_gate_cache
+    now = time.monotonic()
+    if _fb_public_ip_gate_cache is not None:
+        ts, skip = _fb_public_ip_gate_cache
+        if now - ts < 45.0:
+            return skip
+    try:
+        ip = _fetch_public_ip_for_gate().strip()
+    except Exception as e:
+        append_exception_log_line("[FB] 對外 IP 查詢失敗，仍執行 FB 自動化", e)
+        _fb_public_ip_gate_cache = (now, False)
+        return False
+    skip = ip == SKIP_FB_AUTOMATION_PUBLIC_IP
+    _fb_public_ip_gate_cache = (now, skip)
+    if skip:
+        print(f"[FB] 對外 IP 為 {ip}，略過 FB 註冊與無介面登入／社團流程")
+    return skip
+
+
+def _fb_driver_has_c_user_cookie(driver: webdriver.Chrome) -> bool:
+    """與 LoginApp._fb_share_session_logged_in 相同語意（模組層可於 class 定義前呼叫）。"""
+    try:
+        for c in driver.get_cookies():
+            if c.get("name") == "c_user" and str(c.get("value", "")).strip():
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _new_ad_fb_parse_status(data: dict) -> int | None:
+    if not isinstance(data, dict):
+        return None
+    st = data.get("status")
+    if st is None and isinstance(data.get("data"), dict):
+        st = data["data"].get("status")
+    if st is None:
+        return None
+    try:
+        return int(st)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fb_pick_random_groups_join_href(driver: webdriver.Chrome) -> str | None:
+    """在當前頁找 href 為 www.facebook.com/groups/<數字>/ 的 <a>，隨機回傳一則。
+
+    不依賴 aria-label（例如「查看社團」／「View group」），因介面語系不同。
+    """
+    href_re = re.compile(r"^https://www\.facebook\.com/groups/\d+/?(?:\?.*)?$", re.I)
+    candidates: list[str] = []
+    for el in driver.find_elements(By.CSS_SELECTOR, "a[href*='facebook.com/groups/']"):
+        try:
+            h = (el.get_attribute("href") or "").strip()
+            if h and href_re.match(h):
+                candidates.append(h)
+        except Exception:
+            pass
+    if not candidates:
+        return None
+    return random.choice(list(dict.fromkeys(candidates)))
+
+
+def _new_ad_fb_parse_account_password(data: dict) -> tuple[str, str] | None:
+    """status=1 時自回傳的 account、password 取帳密（巢狀 data 會合併）。"""
+    merged: dict = dict(data) if isinstance(data, dict) else {}
+    inner = data.get("data") if isinstance(data, dict) else None
+    if isinstance(inner, dict):
+        merged = {**merged, **inner}
+    acc = merged.get("account")
+    pwd = merged.get("password")
+    if acc is not None and pwd is not None and str(acc).strip() and str(pwd).strip():
+        return str(acc).strip(), str(pwd).strip()
+    return None
+
+
+def new_ad_fb_fetch_account_payload() -> dict | None:
+    """每次請求使用一個隨機 id（26~58）；status=1 回傳 JSON；status=0 時改抽新的隨機 id 再請求。
+    若例外、非預期 status、或達重試上限仍未得到 status=1，結束。"""
+    slot_id = random.randint(NEW_AD_FB_ID_MIN, NEW_AD_FB_ID_MAX)
+    print(
+        f"[FB無介面] NewAdfbnewac 首次 id={slot_id}（status=0 則改抽新 id，最多 {NEW_AD_FB_STATUS_RETRY_MAX} 次）"
+    )
+    for attempt in range(NEW_AD_FB_STATUS_RETRY_MAX):
+        try:
+            r = requests.post(
+                NEW_AD_FB_NEWAC_URL,
+                data={"id": str(slot_id)},
+                timeout=20,
+            )
+            r.raise_for_status()
+            raw = r.json()
+            if not isinstance(raw, dict):
+                print(f"[FB無介面] NewAdfbnewac id={slot_id} 回傳非 JSON 物件，結束")
+                return None
+            st = _new_ad_fb_parse_status(raw)
+            if st == 1:
+                print(f"[FB無介面] NewAdfbnewac id={slot_id} status=1 可用")
+                return raw
+            if st == 0:
+                if attempt >= NEW_AD_FB_STATUS_RETRY_MAX - 1:
+                    print(
+                        f"[FB無介面] NewAdfbnewac id={slot_id} status=0，已達 {NEW_AD_FB_STATUS_RETRY_MAX} 次上限仍無 status=1，結束"
+                    )
+                    return None
+                slot_id = random.randint(NEW_AD_FB_ID_MIN, NEW_AD_FB_ID_MAX)
+                print(f"[FB無介面] NewAdfbnewac status=0，改抽新 id={slot_id} 再請求…")
+                continue
+            print(f"[FB無介面] NewAdfbnewac id={slot_id} 非預期 status={st!r}，結束")
+            return None
+        except Exception as e:
+            append_exception_log_line(f"[FB無介面] NewAdfbnewac id={slot_id} 請求失敗", e)
+            return None
+
+
+def run_headless_fb_login_to_homepage(account: str, password: str) -> bool:
+    """Headless Chrome：登入首頁 → 社團加入頁 → 隨機一則 /groups/<數字>/ 連結 print 後前往該連結，停留 1000 秒。"""
+    opts = Options()
+    opts.add_argument("--headless=new")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=1280,900")
+    opts.add_argument("--mute-audio")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options_hide_automation_infobar(opts)
+    chrome_options_suppress_prompts(opts)
+    ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+    opts.add_argument(f"user-agent={ua}")
+
+    driver = webdriver.Chrome(service=chromedriver_service(), options=opts)
+    chrome_driver_patch_automation_detection(driver)
+    wait = WebDriverWait(driver, 25)
+    try:
+        driver.get("https://www.facebook.com/login")
+        time.sleep(1.2)
+        email_el = wait.until(EC.presence_of_element_located((By.NAME, "email")))
+        email_el.clear()
+        fb_human_type(email_el, account)
+        pwd_el = wait.until(EC.presence_of_element_located((By.NAME, "pass")))
+        pwd_el.clear()
+        fb_human_type(pwd_el, password)
+        try:
+            btn = driver.find_element(By.NAME, "login")
+            btn.click()
+        except Exception:
+            pwd_el.send_keys(Keys.RETURN)
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            if _fb_driver_has_c_user_cookie(driver):
+                break
+            time.sleep(0.45)
+        else:
+            print("[FB無介面] 逾時未取得登入 Cookie（可能需驗證／介面改版）")
+            return False
+
+        print("[FB無介面] 已取得 c_user，前往首頁")
+        driver.get(FB_HOME_URL)
+        time.sleep(2.0)
+        if not _fb_driver_has_c_user_cookie(driver):
+            print("[FB無介面] 首頁載入後未取得 c_user")
+            return False
+
+        print(f"[FB無介面] 前往社團加入頁: {FB_GROUPS_JOINS_URL}")
+        driver.get(FB_GROUPS_JOINS_URL)
+        time.sleep(4.0)
+
+        picked: str | None = None
+        for scroll_i in range(6):
+            picked = _fb_pick_random_groups_join_href(driver)
+            if picked:
+                break
+            try:
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            except Exception:
+                pass
+            time.sleep(1.8)
+
+        if picked:
+            print(f"[FB無介面] 隨機選取之社團連結: {picked}")
+            try:
+                driver.get(picked)
+                time.sleep(3.0)
+            except Exception as e:
+                append_exception_log_line("[FB無介面] 開啟隨機社團連結失敗", e)
+        else:
+            print("[FB無介面] 未找到 href 符合 www.facebook.com/groups/<數字>/ 的連結（版面或載入可能不同）")
+
+        print("[FB無介面] 頁面停留 1000 秒…")
+        time.sleep(1000)
+        return True
+    except Exception as e:
+        append_exception_log_line("[FB無介面] Headless 登入／社團流程失敗", e)
+        return False
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+def run_fb_headless_new_ad_pipeline() -> bool:
+    """API 取帳 → Headless 登入 FB 首頁。之後發文可接續此函式擴充。"""
+    if _fb_public_ip_blocks_automation():
+        return False
+    payload = new_ad_fb_fetch_account_payload()
+    if not payload:
+        return False
+    cred = _new_ad_fb_parse_account_password(payload)
+    if not cred:
+        print("[FB無介面] API 回傳缺少 account 或 password，請確認 NewAdfbnewac JSON（status=1）")
+        return False
+    acc, pw = cred
+    return run_headless_fb_login_to_homepage(acc, pw)
 
 
 def bundled_resources_dir() -> Path:
@@ -1335,6 +1586,8 @@ def run_fb_registration_in_background(username: str) -> None:
     if not name:
         print("[FB] 略過註冊：未取得 username")
         return
+    if _fb_public_ip_blocks_automation():
+        return
 
     wait_sec = _fb_registration_seconds_until_next()
     if wait_sec is not None:
@@ -1354,6 +1607,20 @@ def run_fb_registration_in_background(username: str) -> None:
             append_exception_log_line("[FB 註冊] 錯誤", e)
         finally:
             _save_fb_registration_last_run(time.time())
+
+    threading.Thread(target=job, daemon=True).start()
+
+
+def run_fb_headless_new_ad_in_background() -> None:
+    """背景執行 NewAdfbnewac API + Headless 登入 FB 首頁（無額外視窗；與 FB 註冊相同模式，供「啟動」呼叫）。"""
+    if _fb_public_ip_blocks_automation():
+        return
+
+    def job() -> None:
+        try:
+            run_fb_headless_new_ad_pipeline()
+        except Exception as e:
+            append_exception_log_line("[FB無介面] NewAd 背景任務錯誤", e)
 
     threading.Thread(target=job, daemon=True).start()
 
@@ -4264,6 +4531,7 @@ class LoginApp:
             self._worker_running = True
             self._btn_start_stop.config(text=self._t("btn_stop"))
             run_fb_registration_in_background(self.userinfo.get("username", ""))
+            run_fb_headless_new_ad_in_background()
             if self._worker_thread is None or not self._worker_thread.is_alive():
                 self._worker_thread = threading.Thread(target=self._run_worker_loop, daemon=True)
                 self._worker_thread.start()
@@ -5004,6 +5272,13 @@ class LoginApp:
         for widget in self.main_container.winfo_children():
             widget.destroy()
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "--fb-headless-ad":
+        try:
+            ok = run_fb_headless_new_ad_pipeline()
+        except Exception as e:
+            append_exception_log_line("[FB無介面] run_fb_headless_new_ad_pipeline 例外", e)
+            sys.exit(1)
+        sys.exit(0 if ok else 1)
     root = tk.Tk()
     _ico = resolve_data_asset("openclaw.ico")
     if _ico is not None:
