@@ -7,7 +7,7 @@
   "extra_files": [
     {
       "path": "data/platform.json",
-      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.7/data/platform.json",
+      "url": "https://github.com/Longrui-Digital/TreasureClawLauncher/releases/download/v1.2.7/platform.json",
       "sha256": ""
     }
   ]
