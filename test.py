@@ -87,7 +87,8 @@ LOGIN_MEDIA_FALLBACK_GIF = "VN.gif"
 TIER_BONUS_TABLE_IMAGE = "VN.jpg"
 # 主題色見 data/theme.json；平台／金額見 data/platform.json
 REF_REFERRAL_COMMISSION_VND: dict[int, int] = _E.ref_referral_commission_vnd
-# 累積活躍會員各階／儲值佣金金額：預設來自 platform.json；登入後由 Api/Information 的 recommendAmt、commissionAmt 覆寫
+# 累積活躍會員各階：預設來自 platform.json；登入後由 Api/Information 的 recommendAmt 覆寫
+# LV1 儲值佣金列：以 Api/Information 的 600k × COMMISSION_TIERS_ORDER（不再用 commissionAmt 對照表）
 RECOMMEND_AMT_VND: dict[int, int] = dict(REF_REFERRAL_COMMISSION_VND)
 COMMISSION_AMT_VND: dict[str, float] = dict(_E.commission_amt_vnd)
 SHARE_DEPOSIT_EXAMPLE_VND: int = _E.share_deposit_example_vnd
@@ -99,7 +100,7 @@ SHARE_BOX_TRIAL_L7_BY_PLATFORM: dict[str, float] = dict(
 GUIDE_REVENUE_OPTION4_BY_PLATFORM: dict[str, float] = dict(
     getattr(_E, "guide_revenue_option4_by_platform", {})
 )
-COMMISSION_TIERS_ORDER: tuple[str, ...] = ("30%", "20%", "10%", "4%", "3%", "2%", "1%")
+COMMISSION_TIERS_ORDER: tuple[str, ...] = ("15%", "10%", "5%", "4%", "3%", "2%", "1%")
 # Api/Information：特定等級時顯示洗碼／5 倍券敘述（比例尺用 turnoverRate）
 TURNOVER_LEVELS = frozenset({5, 8, 10, 12, 14, 16, 18, 20, 22})
 TURNOVER_WIN_RATE_PCT = "97.5"
@@ -123,6 +124,17 @@ def _parse_api_float(v: object) -> float | None:
         return None
     try:
         return float(str(v).replace(",", "").replace(" ", "").strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _pct_label_to_fraction(pct_key: str) -> float | None:
+    """'15%' -> 0.15；供 LV1 儲值佣金用 Api/Information 的 600k 乘以各階百分比。"""
+    s = str(pct_key).strip()
+    if not s.endswith("%"):
+        return None
+    try:
+        return float(s[:-1].strip()) / 100.0
     except (ValueError, TypeError):
         return None
 
@@ -2976,7 +2988,7 @@ class LoginApp:
         )
 
     def _build_share_lv1_block_text(self) -> str:
-        """分享區 LV1 儲值佣金區塊：依 COMMISSION_AMT_VND（API commissionAmt）；下線儲值 {deposit} 優先 Api/Information 的 600k。"""
+        """分享區 LV1 儲值佣金：下線儲值額用 Api/Information 的 600k（各平台）；佣金 = 該額 × COMMISSION_TIERS_ORDER 百分比。"""
         d = getattr(self, "_dashboard_data", {}) or {}
         dep_amt = _parse_api_int(d.get("voucher_600k"))
         if dep_amt is None:
@@ -2984,9 +2996,10 @@ class LoginApp:
         dep_s = f"{dep_amt:,}"
         lines: list[str] = []
         for pct_key in COMMISSION_TIERS_ORDER:
-            amt = COMMISSION_AMT_VND.get(pct_key)
-            if amt is None:
+            frac = _pct_label_to_fraction(pct_key)
+            if frac is None:
                 continue
+            amt = int(round(float(dep_amt) * frac))
             lines.append(
                 self._t(
                     "share_box_lv1_line",
